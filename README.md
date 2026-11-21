@@ -1,6 +1,6 @@
 # ForeverQoL
 
-Small quality-of-life improvements for WoW Forever. A framed row inside the bank, beneath its title and above search, contains the visible **item-type dropdown**, **Deposit**, and **Withdraw**, in that order. Search and contents move down together; the bank gains header space while its original body and background retain their dimensions. The dropdown and text buttons use Blizzard's native templates.
+Small quality-of-life improvements for WoW Forever. A row inside the bank, beneath its title and above search, contains the visible **item-type dropdown**, **Deposit**, and **Withdraw**, in that order. The row has no added border or background. Search and contents move down together; the bank gains header space while its original body and background retain their dimensions. The dropdown and text buttons use Blizzard's native templates.
 
 Choose the item types to move, then click Deposit or Withdraw. No types are selected on a new installation. Selections are saved between sessions and shared by both buttons. Trade goods can be selected together or narrowed to cloth, leather, metal and stone, herbs, elemental materials, enchanting materials, and other trade goods through the submenu. The parent Trade goods checkbox selects or clears all its subtypes; unchecking a subtype excludes it.
 

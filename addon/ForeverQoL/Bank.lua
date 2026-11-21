@@ -151,14 +151,13 @@ end
 function F.AttachBankControls()
     if controls or not BankFrame or not BankFrame.BankPanel or not BankFrame.BankItemSearchBox or not F.filters then return end
     controls = {}
-    local row = CreateFrame('Frame', nil, BankFrame, 'NineSlicePanelTemplate')
+    -- A plain layout container has no inherited full-parent anchors, elevated
+    -- NineSlice frame level, border, or background to cover the bank contents.
+    local row = CreateFrame('Frame', nil, BankFrame)
+    row:ClearAllPoints()
     row:SetHeight(38)
     row:SetPoint('TOPLEFT', BankFrame, 'TOPLEFT', 76, -26)
     row:SetPoint('TOPRIGHT', BankFrame, 'TOPRIGHT', -12, -26)
-    NineSliceUtil.ApplyLayoutByName(row, 'InsetFrameTemplate')
-    local background = row:CreateTexture(nil, 'BACKGROUND')
-    background:SetAllPoints()
-    background:SetColorTexture(0.04, 0.035, 0.025, 0.95)
     controls.row = row
     local function Button(key, text, width, action)
         local button = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")

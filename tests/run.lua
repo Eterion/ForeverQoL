@@ -198,6 +198,7 @@ local function widget(kind, template)
     function w:SetDefaultText(value) self.text = value end
     function w:SetupMenu(builder) menuBuilder = builder; filterWidget = self end
     function w:CreateTexture()
+        self.createdTextures = (self.createdTextures or 0) + 1
         local texture = {}
         function texture:SetAllPoints() end
         function texture:SetColorTexture() end
@@ -210,9 +211,15 @@ end
 CreateFrame = function(kind, _, parent, template)
     local w = widget(kind, template)
     w.parent = parent
+    -- Blizzard's template inherits setAllPoints=true and frameLevel=500.
+    -- Model those defaults so a template regression cannot hide behind mocks.
+    if template == 'NineSlicePanelTemplate' then
+        w:SetPoint('TOPLEFT', parent, 'TOPLEFT', 0, 0)
+        w:SetPoint('BOTTOMRIGHT', parent, 'BOTTOMRIGHT', 0, 0)
+        w.frameLevel = 500
+    end
     return w
 end
-NineSliceUtil = {ApplyLayoutByName = function(frame, name) frame.layout = name end}
 BankFrame.BankPanel = widget('Frame')
 BankFrame.BankPanel:SetSize(480, 460)
 BankFrame.BankPanel:SetPoint('LEFT', BankFrame, 'LEFT', 0, 0)
@@ -257,17 +264,19 @@ local row = depositButton.parent
 check(depositButton.template == 'UIPanelButtonTemplate' and withdrawButton.template == 'UIPanelButtonTemplate', 'native button templates')
 local rowChildren = 0
 for _, w in ipairs(widgets) do if w.parent == row then rowChildren = rowChildren + 1 end end
-check(rowChildren == 3 and row.layout == 'InsetFrameTemplate', 'framed row has dropdown and two actions; no standalone stop')
-check(filterWidget.template == 'WowStyle1DropdownTemplate' and filterWidget.parent == row and withdrawButton.parent == row, 'dropdown and both buttons belong to framed row')
+check(rowChildren == 3 and row.template == nil and row.frameLevel == nil, 'row uses plain container without full-parent template or elevated frame level')
+check(not row.createdTextures, 'row has no added background texture')
+check(#row.points == 2 and row.points[1][1] == 'TOPLEFT' and row.points[2][1] == 'TOPRIGHT', 'row has only top anchors; no inherited bottom anchor can stretch it')
+check(filterWidget.template == 'WowStyle1DropdownTemplate' and filterWidget.parent == row and withdrawButton.parent == row, 'dropdown and both buttons belong to row')
 check(BankFrame.height == 504 and BankFrame.BankPanel.height == 460 and BankFrame.BankPanel.point[5] == -44, 'outer window gains one header; original body retains height')
 check(BankFrame.BankItemSearchBox.point[2] == BankFrame.BankPanel and BankFrame.BankItemSearchBox.point[5] == -33, 'search moves with body at its original local offset')
 check(BankFrame.Background.points[1][2] == BankFrame.BankPanel and BankFrame.Background.points[2][2] == BankFrame.BankPanel, 'native art is attached to original body instead of expanded window')
 check(BankFrame.Background.points[1][5] == -20 and BankFrame.Background.points[2][5] == 30, 'native background dimensions preserved by original inset offsets')
-check(row.points[1][4] == 76 and row.points[1][5] == -26 and row.height == 38, 'framed row fits beneath title and beside portrait')
+check(row.points[1][4] == 76 and row.points[1][5] == -26 and row.height == 38, 'short row fits beneath title and beside portrait')
 check(26 + row.height < 44 + 33 and 44 + 33 + 20 < 44 + 63, 'row clears search and search clears first native item row')
 local dropdownWidth = 480 - 76 - 12 - 8 - 8 - 100 - 100 - 4 - 8
 check(dropdownWidth >= 150, 'visible filter has room for selected group at narrowest bank width')
-check(withdrawButton.point[2] == row and depositButton.point[2] == withdrawButton, 'text actions align at right of framed row')
+check(withdrawButton.point[2] == row and depositButton.point[2] == withdrawButton, 'text actions align at right of row')
 check(filterWidget.point[2] == depositButton, 'filter dropdown stays left of actions')
 BankFrame.BankPanel.height = 695
 BankFrame.height = 695
@@ -277,6 +286,7 @@ check(BankFrame.height == 739 and BankFrame.BankPanel.height == 695, 'larger nat
 hooks.GenerateItemSlotsForSelectedTab()
 hooks.GenerateItemSlotsForSelectedTab()
 check(BankFrame.height == 739, 'repeated page layout does not accumulate height')
+check(row.height == 38 and #row.points == 2, 'row stays short when bank contents grow')
 BankFrame.BankPanel.height = 460
 BankFrame.height = 460
 hooks.GenerateItemSlotsForSelectedTab()
