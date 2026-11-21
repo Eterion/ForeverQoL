@@ -81,3 +81,28 @@ function F.FilterCount()
     if F.filters.tradegoods then n = n + 1 end
     return n
 end
+
+function F.FilterSummary()
+    local labels, all = {}, true
+    local allTrade = F.IsSelected({ key = 'tradegoods' })
+    for _, category in ipairs(F.categories) do
+        if category.key == 'tradegoods' then
+            if allTrade then
+                labels[#labels + 1] = category.label
+            else
+                all = false
+                for _, trade in ipairs(F.tradeCategories) do
+                    if F.IsSelected(trade) then labels[#labels + 1] = trade.label end
+                end
+            end
+        elseif F.IsSelected(category) then
+            labels[#labels + 1] = category.label
+        else
+            all = false
+        end
+    end
+    if all then return 'All item types' end
+    if #labels == 0 then return 'Item types' end
+    if #labels == 1 then return labels[1] end
+    return labels[1] .. ' +' .. (#labels - 1)
+end

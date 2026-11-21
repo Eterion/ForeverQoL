@@ -1,12 +1,14 @@
 # ForeverQoL
 
-Small quality-of-life improvements for WoW Forever. The first module adds **Deposit**, **Withdraw**, and a checkbox **Item types** dropdown to Blizzard's bank header, using Blizzard's button and dropdown templates.
+Small quality-of-life improvements for WoW Forever. The first module adds **Deposit**, **Withdraw**, and a checkbox **Item types** dropdown in a dedicated row below Blizzard's search controls, using Blizzard's button and dropdown templates. The window gains room for the row while keeping the native item grid and footer spacing.
 
 Choose the item types to move, then click Deposit or Withdraw. No types are selected on a new installation. Selections are saved between sessions and shared by both buttons. Trade goods can be selected together or narrowed to cloth, leather, metal and stone, herbs, elemental materials, enchanting materials, and other trade goods through the submenu. The parent Trade goods checkbox selects or clears all its subtypes; unchecking a subtype excludes it.
 
 Transfers apply to the selected character or account bank and use all its purchased storage, across pages. Deposit moves items from equipped bags; Withdraw moves items back into bags. Equipped gear is excluded. The existing bank search box filters the display only; it does not narrow transfers.
 
-The addon processes one stack at a time and reports the confirmed item count. **Stop transfer**, closing the bank, changing bank type, entering combat, or holding an item on the cursor stops the operation. A move that makes no progress stops after two seconds, including full storage and server restrictions. Locked items and items without type information are skipped. Refundable items are skipped when depositing to the account bank to preserve their refund window.
+The filter summarizes a complete trade-goods selection as **Trade goods**, individual selections by name, and all types as **All item types**. Multiple selected groups use the first name and a count of additional groups.
+
+The addon processes one stack at a time and reports the confirmed item count. During a transfer, the active Deposit or Withdraw button becomes **Stop transfer**; the other action and filter are disabled. Clicking it, closing the bank, changing bank type, entering combat, or holding an item on the cursor stops the operation. A move that makes no progress stops after two seconds, including full storage and server restrictions. Locked items and items without type information are skipped. Refundable items are skipped when depositing to the account bank to preserve their refund window.
 
 Use `/fql` or `/foreverqol` to see the loaded version. After installing a development build, `/reload` and check `/fql` for its exact identifier.
 
@@ -20,5 +22,7 @@ Use `/fql` or `/foreverqol` to see the loaded version. After installing a develo
 ## Client reference and validation
 
 Bank API and layout reference: the [Forever client bank UI](https://github.com/Gethe/wow-ui-source/tree/forever/Interface/AddOns/Blizzard_UIPanels_Game/Camelot) and [generated API documentation](https://github.com/Gethe/wow-ui-source/tree/forever/Interface/AddOns/Blizzard_APIDocumentationGenerated).
+
+Forever exposes `C_Bank.AutoDepositItemsIntoBank(bankType)` and `C_Bank.DoesBankTypeSupportAutoDeposit(bankType)`. The bulk deposit call has no per-call item filter or cancellation argument, so this module uses native `C_Container.UseContainerItem` calls to preserve its checkbox selection and stoppable queue. It does not change Blizzard's bank-tab deposit settings.
 
 Offline tests cover filtering, deposit/withdraw routing, bag coverage, account-bank restrictions, cancellation, stale slots, failed moves, counts, and native widget/menu construction. In-game appearance, server permissions for timer-driven transfers, partial-stack behavior, account-bank restrictions and taint/combat interactions require live verification. Check both bank types, full inventory/bank, bank closure mid-transfer, reload persistence and `/fql` before the first release.
