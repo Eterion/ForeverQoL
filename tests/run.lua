@@ -177,35 +177,64 @@ check(#uses == 0, 'never uses inventory items outside bank')
 local buttons, hooks, eventFrame, menuBuilder = {}, {}, nil, nil
 local widgets, filterWidget = {}, nil
 local function widget(kind, template)
-    local w = {kind = kind, template = template, scripts = {}}
+    local w = {kind = kind, template = template, scripts = {}, points = {}}
     widgets[#widgets + 1] = w
     function w:SetSize(width, height) self.width, self.height = width, height end
     function w:GetHeight() return self.height end
     function w:SetHeight(height) self.height = height end
-    function w:ClearAllPoints() self.point = nil end
-    function w:SetPoint(...) self.point = {...} end
+    function w:ClearAllPoints() self.point = nil; self.points = {} end
+    function w:SetPoint(...)
+        self.point = {...}
+        for index, point in ipairs(self.points) do
+            if point[1] == self.point[1] then self.points[index] = self.point; return end
+        end
+        self.points[#self.points + 1] = self.point
+    end
+    function w:GetPoint(index) return unpack(self.points[index or 1]) end
     function w:SetText(text) self.text = text; buttons[text] = self end
     function w:SetScript(event, fn) self.scripts[event] = fn end
     function w:SetEnabled(value) self.enabled = value end
     function w:SetShown(value) self.shown = value end
+    function w:SetDefaultText(value) self.text = value end
+    function w:SetupMenu(builder) menuBuilder = builder; filterWidget = self end
+    function w:CreateTexture()
+        local texture = {}
+        function texture:SetAllPoints() end
+        function texture:SetColorTexture() end
+        return texture
+    end
     function w:RegisterEvent() end
     if kind == 'Frame' then eventFrame = w end
     return w
 end
-CreateFrame = function(kind, _, _, template) return widget(kind, template) end
+CreateFrame = function(kind, _, parent, template)
+    local w = widget(kind, template)
+    w.parent = parent
+    return w
+end
+NineSliceUtil = {ApplyLayoutByName = function(frame, name) frame.layout = name end}
 BankFrame.BankPanel = widget('Frame')
 BankFrame.BankPanel:SetSize(480, 460)
 BankFrame.BankPanel:SetPoint('LEFT', BankFrame, 'LEFT', 0, 0)
 BankFrame.BankItemSearchBox = widget('EditBox')
 BankFrame.BankItemSearchBox:SetSize(110, 20)
 BankFrame.BankItemSearchBox:SetPoint('TOPRIGHT', BankFrame, 'TOPRIGHT', -56, -33)
+BankFrame.Background = widget('Texture')
+BankFrame.Background:SetPoint('TOPLEFT', BankFrame, 'TOPLEFT', 0, -20)
+BankFrame.Background:SetPoint('BOTTOMRIGHT', BankFrame, 'BOTTOMRIGHT', 0, 30)
 BankFrame.height = 460
-local function forbiddenMutation() error('addon attempted to move or resize native Blizzard UI') end
-for _, native in ipairs({BankFrame, BankFrame.BankPanel, BankFrame.BankItemSearchBox}) do
-    for _, method in ipairs({'SetHeight', 'SetWidth', 'SetSize', 'SetPoint', 'ClearAllPoints'}) do
-        native[method] = forbiddenMutation
-    end
-end
+local function forbiddenMutation() error('addon attempted to resize original native body or artwork') end
+BankFrame.SetHeight = function(self, height) self.height = height end
+BankFrame.BankPanel.SetHeight, BankFrame.BankPanel.SetSize = forbiddenMutation, forbiddenMutation
+BankFrame.BankItemSearchBox.SetSize = forbiddenMutation
+BankFrame.Background.SetSize = forbiddenMutation
+local firstTab, secondTab = widget('Frame'), widget('Frame')
+firstTab:SetPoint('TOPLEFT', BankFrame, 'TOPRIGHT', 0, -60)
+secondTab:SetPoint('TOPLEFT', firstTab, 'BOTTOMLEFT', 0, -2)
+BankFrame.bankPageTabPool = {EnumerateActive = function()
+    local index = 0
+    return function() index = index + 1; return ({firstTab, secondTab})[index] end
+end}
 BankFrame.HookScript = function(_, event, fn) hooks[event] = fn end
 hooksecurefunc = function(_, name, fn) hooks[name] = fn end
 MenuResponse = {Refresh = 1}
@@ -221,38 +250,49 @@ function menu:CreateCheckbox(label, selected, click)
     entries[label] = entry
     return entry
 end
-MenuUtil = {CreateContextMenu = function(owner, builder)
-    menuBuilder = builder
-    builder(owner, menu)
-end}
 reset()
 F.AttachBankControls()
 local depositButton, withdrawButton = buttons.Deposit, buttons.Withdraw
-filterWidget = buttons.Filter
+local row = depositButton.parent
 check(depositButton.template == 'UIPanelButtonTemplate' and withdrawButton.template == 'UIPanelButtonTemplate', 'native button templates')
-check(#widgets == 5 and filterWidget.template == 'UIPanelButtonTemplate', 'three native text buttons; no standalone stop widget')
-check(BankFrame.height == 460 and BankFrame.BankPanel.point[1] == 'LEFT', 'bank and item panel retain native size and anchors')
-check(BankFrame.BankItemSearchBox.point[4] == -56 and BankFrame.BankItemSearchBox.point[5] == -33, 'search retains native anchor')
-check(withdrawButton.point[2] == BankFrame.BankItemSearchBox and withdrawButton.point[4] == -8, 'withdraw anchors left of search without moving it')
-check(filterWidget.point[2] == depositButton and depositButton.point[2] == withdrawButton, 'left-to-right order is Filter, Deposit, Withdraw')
-local totalWidth = depositButton.width + withdrawButton.width + filterWidget.width + 4 + 4 + 8
-check(480 - 56 - 110 - totalWidth >= 78, 'compact controls clear portrait at smallest native bank width')
-check(33 + filterWidget.height < 63, 'controls fit above native item grid')
+local rowChildren = 0
+for _, w in ipairs(widgets) do if w.parent == row then rowChildren = rowChildren + 1 end end
+check(rowChildren == 3 and row.layout == 'InsetFrameTemplate', 'framed row has dropdown and two actions; no standalone stop')
+check(filterWidget.template == 'WowStyle1DropdownTemplate' and filterWidget.parent == row and withdrawButton.parent == row, 'dropdown and both buttons belong to framed row')
+check(BankFrame.height == 504 and BankFrame.BankPanel.height == 460 and BankFrame.BankPanel.point[5] == -44, 'outer window gains one header; original body retains height')
+check(BankFrame.BankItemSearchBox.point[2] == BankFrame.BankPanel and BankFrame.BankItemSearchBox.point[5] == -33, 'search moves with body at its original local offset')
+check(BankFrame.Background.points[1][2] == BankFrame.BankPanel and BankFrame.Background.points[2][2] == BankFrame.BankPanel, 'native art is attached to original body instead of expanded window')
+check(BankFrame.Background.points[1][5] == -20 and BankFrame.Background.points[2][5] == 30, 'native background dimensions preserved by original inset offsets')
+check(row.points[1][4] == 76 and row.points[1][5] == -26 and row.height == 38, 'framed row fits beneath title and beside portrait')
+check(26 + row.height < 44 + 33 and 44 + 33 + 20 < 44 + 63, 'row clears search and search clears first native item row')
+local dropdownWidth = 480 - 76 - 12 - 8 - 8 - 100 - 100 - 4 - 8
+check(dropdownWidth >= 150, 'visible filter has room for selected group at narrowest bank width')
+check(withdrawButton.point[2] == row and depositButton.point[2] == withdrawButton, 'text actions align at right of framed row')
+check(filterWidget.point[2] == depositButton, 'filter dropdown stays left of actions')
 BankFrame.BankPanel.height = 695
 BankFrame.height = 695
 hooks.OnShow()
 hooks.SetTab()
-check(BankFrame.height == 695 and BankFrame.BankPanel.height == 695, 'page and tab refresh leave native geometry untouched')
-check(hooks.GenerateItemSlotsForSelectedTab == nil, 'no native item layout hook')
+check(BankFrame.height == 739 and BankFrame.BankPanel.height == 695, 'larger native page gains header without resizing body')
+hooks.GenerateItemSlotsForSelectedTab()
+hooks.GenerateItemSlotsForSelectedTab()
+check(BankFrame.height == 739, 'repeated page layout does not accumulate height')
+BankFrame.BankPanel.height = 460
+BankFrame.height = 460
+hooks.GenerateItemSlotsForSelectedTab()
+check(BankFrame.height == 504, 'switching to shorter page removes excess height')
+hooks.RefreshPageTabs()
+hooks.RefreshPageTabs()
+check(firstTab.point[5] == -104 and secondTab.point[2] == firstTab and secondTab.point[5] == -2, 'page tabs follow content without accumulating offsets or changing spacing')
 check(not depositButton.enabled, 'no selection disables transfer buttons')
-filterWidget.scripts.OnClick(filterWidget)
-check(menuBuilder ~= nil and menu.title == 'Transfer item types: Item types', 'Filter button opens native checkbox menu with selection summary')
+menuBuilder(filterWidget, menu)
+check(menuBuilder ~= nil and menu.title == 'Transfer item types: Item types', 'dropdown opens native checkbox menu with selection summary')
 entries.Herbs.click()
 check(entries.Herbs.selected() and depositButton.enabled, 'checkbox updates saved filter and controls')
-check(F.FilterSummary() == 'Herbs', 'single subtype uses its name')
+check(filterWidget.text == 'Herbs', 'dropdown shows selected subtype')
 entries['Select all'].click()
 check(F.FilterCount() == #F.categories + #F.tradeCategories - 1, 'select all')
-check(F.FilterSummary() == 'All item types', 'full selection uses compact summary')
+check(filterWidget.text == 'All item types', 'dropdown shows all-types selection')
 entries.Herbs.click()
 check(not F.Matches(100) and F.Matches(104) and not entries['Trade goods'].selected(), 'unchecking subtype after select all excludes it')
 entries['Trade goods'].click()
@@ -260,13 +300,13 @@ check(F.Matches(100) and entries['Trade goods'].selected(), 'parent checkbox sel
 entries['Clear all'].click()
 check(F.FilterCount() == 0 and not withdrawButton.enabled, 'clear all')
 entries['Trade goods'].click()
-check(F.FilterSummary() == 'Trade goods', 'all trade subtypes summarize as trade goods')
-filterWidget.scripts.OnClick(filterWidget)
-check(menu.title == 'Transfer item types: Trade goods' and filterWidget.text == 'Filter', 'selection appears inside menu while button retains fixed label')
+check(filterWidget.text == 'Trade goods', 'dropdown summarizes all trade subtypes as trade goods')
+menuBuilder(filterWidget, menu)
+check(menu.title == 'Transfer item types: Trade goods', 'menu heading also shows selected group')
 entries.Consumables.click()
-check(F.FilterSummary() == 'Consumables +1', 'multiple groups collapse trade subtypes into one group')
+check(filterWidget.text == 'Consumables +1', 'dropdown collapses trade subtypes into one additional group')
 entries['Clear all'].click()
-check(F.FilterSummary() == 'Item types', 'empty selection restores prompt')
+check(filterWidget.text == 'Item types', 'empty selection restores dropdown prompt')
 F.filters.tradegoods = true
 bags[0] = {item(100), item(104)}
 depositButton.scripts.OnClick()

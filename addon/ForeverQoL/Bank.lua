@@ -1,5 +1,37 @@
 local _, F = ...
 local job, controls
+local headerSpace = 44
+
+function F.LayoutBankControls()
+    if not controls then return end
+    local panel = BankFrame.BankPanel
+    -- Blizzard owns the body's height and recalculates it for each page. Add
+    -- our header to that height, never to the already-expanded outer frame.
+    panel:ClearAllPoints()
+    panel:SetPoint('TOPLEFT', BankFrame, 'TOPLEFT', 0, -headerSpace)
+    BankFrame:SetHeight(panel:GetHeight() + headerSpace)
+    local search = BankFrame.BankItemSearchBox
+    search:ClearAllPoints()
+    search:SetPoint('TOPRIGHT', panel, 'TOPRIGHT', -56, -33)
+    -- Keep the native background at its original body dimensions. Extending
+    -- it over the extra header distorts the relationship between art and slots.
+    if BankFrame.Background then
+        BankFrame.Background:ClearAllPoints()
+        BankFrame.Background:SetPoint('TOPLEFT', panel, 'TOPLEFT', 0, -20)
+        BankFrame.Background:SetPoint('BOTTOMRIGHT', panel, 'BOTTOMRIGHT', 0, 30)
+    end
+end
+
+local function LayoutPageTabs()
+    if not BankFrame.bankPageTabPool then return end
+    for tab in BankFrame.bankPageTabPool:EnumerateActive() do
+        local point, relativeTo, relativePoint, x = tab:GetPoint(1)
+        if relativeTo == BankFrame and point == 'TOPLEFT' and relativePoint == 'TOPRIGHT' then
+            tab:ClearAllPoints()
+            tab:SetPoint(point, relativeTo, relativePoint, x, -60 - headerSpace)
+        end
+    end
+end
 
 local function ActiveBank()
     if not BankFrame or not BankFrame:IsShown() then return nil end
@@ -22,6 +54,7 @@ function F.RefreshControls()
         button:SetText(stopping and 'Stop transfer' or (key == 'deposit' and 'Deposit' or 'Withdraw'))
     end
     controls.filter:SetEnabled(not job)
+    controls.filter:SetDefaultText(F.FilterSummary())
 end
 
 function F.StopTransfer(reason)
@@ -116,10 +149,19 @@ local function Tooltip(button, text, deposit)
 end
 
 function F.AttachBankControls()
-    if controls or not BankFrame or not BankFrame.BankItemSearchBox or not F.filters then return end
+    if controls or not BankFrame or not BankFrame.BankPanel or not BankFrame.BankItemSearchBox or not F.filters then return end
     controls = {}
+    local row = CreateFrame('Frame', nil, BankFrame, 'NineSlicePanelTemplate')
+    row:SetHeight(38)
+    row:SetPoint('TOPLEFT', BankFrame, 'TOPLEFT', 76, -26)
+    row:SetPoint('TOPRIGHT', BankFrame, 'TOPRIGHT', -12, -26)
+    NineSliceUtil.ApplyLayoutByName(row, 'InsetFrameTemplate')
+    local background = row:CreateTexture(nil, 'BACKGROUND')
+    background:SetAllPoints()
+    background:SetColorTexture(0.04, 0.035, 0.025, 0.95)
+    controls.row = row
     local function Button(key, text, width, action)
-        local button = CreateFrame("Button", nil, BankFrame, "UIPanelButtonTemplate")
+        local button = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         button:SetSize(width, 22)
         button:SetText(text)
         button:SetScript("OnClick", action)
@@ -133,23 +175,17 @@ function F.AttachBankControls()
             F.StartTransfer(deposit)
         end
     end
-    Tooltip(Button("deposit", "Deposit", 76, function() Action(true) end),
+    Tooltip(Button("deposit", "Deposit", 100, function() Action(true) end),
         "Deposit matching items from your bags into the selected bank. Uses all purchased storage in that bank.", true)
-    Tooltip(Button("withdraw", "Withdraw", 80, function() Action(false) end),
+    Tooltip(Button("withdraw", "Withdraw", 100, function() Action(false) end),
         "Withdraw matching items from all purchased storage in the selected bank into your bags.", false)
-    local filter = Button('filter', 'Filter', 52, nil)
-    -- Fit only our widgets into the existing header. All Blizzard anchors and
-    -- dimensions remain owned by Blizzard, including the background artwork.
-    controls.withdraw:SetPoint('RIGHT', BankFrame.BankItemSearchBox, 'LEFT', -8, 0)
+    local filter = CreateFrame('DropdownButton', nil, row, 'WowStyle1DropdownTemplate')
+    filter:SetHeight(22)
+    controls.filter = filter
+    controls.withdraw:SetPoint('RIGHT', row, 'RIGHT', -8, 0)
     controls.deposit:SetPoint('RIGHT', controls.withdraw, 'LEFT', -4, 0)
-    filter:SetPoint('RIGHT', controls.deposit, 'LEFT', -4, 0)
-    filter:SetScript('OnEnter', function(self)
-        GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
-        GameTooltip:SetText('Filter')
-        GameTooltip:AddLine(F.FilterSummary(), 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    filter:SetScript('OnLeave', function() GameTooltip:Hide() end)
+    filter:SetPoint('LEFT', row, 'LEFT', 8, 0)
+    filter:SetPoint('RIGHT', controls.deposit, 'LEFT', -8, 0)
     local function BuildMenu(_, root)
         root:CreateTitle("Transfer item types: " .. F.FilterSummary())
         local function SelectAll(value)
@@ -178,14 +214,22 @@ function F.AttachBankControls()
             end
         end
     end
-    filter:SetScript('OnClick', function(self)
-        MenuUtil.CreateContextMenu(self, BuildMenu)
-    end)
+    filter:SetupMenu(BuildMenu)
     BankFrame:HookScript("OnHide", function() F.StopTransfer("Bank closed.") end)
-    BankFrame:HookScript("OnShow", F.RefreshControls)
-    hooksecurefunc(BankFrame, "SetTab", function()
-        if job then F.StopTransfer("Bank changed.") end
+    BankFrame:HookScript("OnShow", function()
+        F.LayoutBankControls()
+        LayoutPageTabs()
         F.RefreshControls()
     end)
+    hooksecurefunc(BankFrame.BankPanel, 'GenerateItemSlotsForSelectedTab', F.LayoutBankControls)
+    hooksecurefunc(BankFrame, 'RefreshPageTabs', LayoutPageTabs)
+    hooksecurefunc(BankFrame, "SetTab", function()
+        if job then F.StopTransfer("Bank changed.") end
+        F.LayoutBankControls()
+        LayoutPageTabs()
+        F.RefreshControls()
+    end)
+    F.LayoutBankControls()
+    LayoutPageTabs()
     F.RefreshControls()
 end

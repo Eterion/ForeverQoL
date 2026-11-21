@@ -7,4 +7,4 @@
 - Publish only when the owner explicitly requests a release, through the manual GitHub Actions workflow. Commits, pushes and local installs do not trigger releases.
 - Bump the public version once per release based on changes since the previous public release: patch for fixes only, minor for new features. Development deployments do not consume public versions.
 - Preserve native Blizzard styling and keep modules independent as quality-of-life features grow.
-- Bank controls must fit the existing header. Do not resize or reanchor Blizzard's bank, item panel, search, artwork or other native controls to make room.
+- Bank controls occupy their own framed row inside the bank beneath its title, above search. The owner authorized moving search and contents down together to make room. Keep the visible filter dropdown left of labeled Deposit/Withdraw buttons. Preserve the native body's dimensions and anchor its background to that body, rather than stretching its art over the added header. Derive the outer height from Blizzard's current body height so page changes and repeated refreshes cannot accumulate extra height.
