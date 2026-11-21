@@ -1,0 +1,10 @@
+/dist/
+/work/
+/.local/
+/.vscode/
+*.log
+/WTF/
+/Cache/
+/SavedVariables/
+.env
+.env.*

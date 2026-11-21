@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: ForeverQoL
+## Notes: Small quality-of-life improvements for WoW Forever.
+## Version: 0.1.0
+## Category: Bags & Inventory
+## X-GitHub: https://github.com/Eterion/ForeverQoL
+## SavedVariables: ForeverQoLDB
+Filters.lua
+Bank.lua
+Core.lua

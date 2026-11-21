@@ -1,0 +1,77 @@
+name: Release ForeverQoL
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version in ForeverQoL.toc (without v)
+        required: true
+        type: string
+      notes:
+        description: User-visible release notes
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: foreverqol-release
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.ref == 'refs/heads/master' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare Lua test runtime
+        shell: pwsh
+        run: python -m pip install lupa==2.6
+      - name: Validate and package
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $toc = Get-Content addon/ForeverQoL/ForeverQoL.toc -Raw
+          $version = [regex]::Match($toc, '(?m)^## Version:[ \t]*(\d+\.\d+\.\d+)[ \t]*\r?$').Groups[1].Value
+          if (-not $version -or $env:RELEASE_VERSION -cne $version) { throw 'Requested version must match TOC.' }
+          # package.ps1 uses the same runtime via a small CLI-compatible wrapper.
+          ./tools/package.ps1 -LuaPath ./tools/lua-ci.cmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foreverqol-package
+          path: dist/v${{ inputs.version }}/
+          if-no-files-found: error
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: foreverqol-package
+          path: package
+      - name: Publish stable release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: |
+          tag="v$RELEASE_VERSION"
+          asset="package/ForeverQoL-$RELEASE_VERSION.zip"
+          test -s "$asset"
+          test -s package/release.json
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" --silent 2>/dev/null; then
+            echo "Tag $tag already exists." >&2
+            exit 1
+          fi
+          printf '%s\n' "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$tag" "$asset" package/release.json \
+            --target "$GITHUB_SHA" --title "ForeverQoL $tag" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" --latest
