@@ -19,13 +19,9 @@ function F.RefreshControls()
         local stopping = job and job.deposit == (key == 'deposit')
         local canClick = stopping or (not job and enabled) or false
         button:SetEnabled(canClick)
-        button.Icon:SetTexture(stopping and 'Interface\\Buttons\\WHITE8X8' or button.arrowTexture)
-        button.Icon:SetSize(stopping and 8 or 20, stopping and 8 or 20)
-        button.Icon:SetVertexColor(stopping and 1 or 0.9, stopping and 0.4 or 0.9, stopping and 0.3 or 0.9)
-        button.Icon:SetAlpha(canClick and 1 or 0.4)
+        button:SetText(stopping and 'Stop transfer' or (key == 'deposit' and 'Deposit' or 'Withdraw'))
     end
     controls.filter:SetEnabled(not job)
-    controls.filter:SetDefaultText(F.FilterSummary())
 end
 
 function F.StopTransfer(reason)
@@ -122,13 +118,10 @@ end
 function F.AttachBankControls()
     if controls or not BankFrame or not BankFrame.BankItemSearchBox or not F.filters then return end
     controls = {}
-    local function Button(key, arrow, action)
+    local function Button(key, text, width, action)
         local button = CreateFrame("Button", nil, BankFrame, "UIPanelButtonTemplate")
-        button:SetSize(24, 22)
-        button:SetText('')
-        button.arrowTexture = 'Interface\\Buttons\\UI-ScrollBar-Scroll' .. arrow .. 'Button-Up'
-        button.Icon = button:CreateTexture(nil, 'OVERLAY')
-        button.Icon:SetPoint('CENTER')
+        button:SetSize(width, 22)
+        button:SetText(text)
         button:SetScript("OnClick", action)
         controls[key] = button
         return button
@@ -140,20 +133,25 @@ function F.AttachBankControls()
             F.StartTransfer(deposit)
         end
     end
-    Tooltip(Button("deposit", "Down", function() Action(true) end),
+    Tooltip(Button("deposit", "Deposit", 76, function() Action(true) end),
         "Deposit matching items from your bags into the selected bank. Uses all purchased storage in that bank.", true)
-    Tooltip(Button("withdraw", "Up", function() Action(false) end),
+    Tooltip(Button("withdraw", "Withdraw", 80, function() Action(false) end),
         "Withdraw matching items from all purchased storage in the selected bank into your bags.", false)
-    local dropdown = CreateFrame("DropdownButton", nil, BankFrame, "WowStyle1DropdownTemplate")
-    dropdown:SetSize(142, 22)
+    local filter = Button('filter', 'Filter', 52, nil)
     -- Fit only our widgets into the existing header. All Blizzard anchors and
     -- dimensions remain owned by Blizzard, including the background artwork.
-    dropdown:SetPoint('RIGHT', BankFrame.BankItemSearchBox, 'LEFT', -8, 0)
-    controls.withdraw:SetPoint('RIGHT', dropdown, 'LEFT', -4, 0)
+    controls.withdraw:SetPoint('RIGHT', BankFrame.BankItemSearchBox, 'LEFT', -8, 0)
     controls.deposit:SetPoint('RIGHT', controls.withdraw, 'LEFT', -4, 0)
-    controls.filter = dropdown
-    dropdown:SetupMenu(function(_, root)
-        root:CreateTitle("Transfer item types")
+    filter:SetPoint('RIGHT', controls.deposit, 'LEFT', -4, 0)
+    filter:SetScript('OnEnter', function(self)
+        GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+        GameTooltip:SetText('Filter')
+        GameTooltip:AddLine(F.FilterSummary(), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    filter:SetScript('OnLeave', function() GameTooltip:Hide() end)
+    local function BuildMenu(_, root)
+        root:CreateTitle("Transfer item types: " .. F.FilterSummary())
         local function SelectAll(value)
             for _, list in ipairs({ F.categories, F.tradeCategories }) do
                 for _, category in ipairs(list) do
@@ -179,6 +177,9 @@ function F.AttachBankControls()
                 for _, trade in ipairs(F.tradeCategories) do Add(checkbox, trade) end
             end
         end
+    end
+    filter:SetScript('OnClick', function(self)
+        MenuUtil.CreateContextMenu(self, BuildMenu)
     end)
     BankFrame:HookScript("OnHide", function() F.StopTransfer("Bank closed.") end)
     BankFrame:HookScript("OnShow", F.RefreshControls)

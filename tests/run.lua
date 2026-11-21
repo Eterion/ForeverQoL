@@ -188,17 +188,6 @@ local function widget(kind, template)
     function w:SetScript(event, fn) self.scripts[event] = fn end
     function w:SetEnabled(value) self.enabled = value end
     function w:SetShown(value) self.shown = value end
-    function w:SetDefaultText(value) self.text = value end
-    function w:CreateTexture()
-        local texture = {}
-        function texture:SetPoint() end
-        function texture:SetTexture(path) self.path = path end
-        function texture:SetSize(width, height) self.width, self.height = width, height end
-        function texture:SetVertexColor() end
-        function texture:SetAlpha(value) self.alpha = value end
-        return texture
-    end
-    function w:SetupMenu(fn) menuBuilder = fn; filterWidget = self end
     function w:RegisterEvent() end
     if kind == 'Frame' then eventFrame = w end
     return w
@@ -222,7 +211,7 @@ hooksecurefunc = function(_, name, fn) hooks[name] = fn end
 MenuResponse = {Refresh = 1}
 local entries = {}
 local menu = {}
-function menu:CreateTitle() end
+function menu:CreateTitle(text) self.title = text end
 function menu:CreateDivider() end
 function menu:CreateButton(label, fn) entries[label] = {click = fn} end
 function menu:CreateCheckbox(label, selected, click)
@@ -232,19 +221,20 @@ function menu:CreateCheckbox(label, selected, click)
     entries[label] = entry
     return entry
 end
+MenuUtil = {CreateContextMenu = function(owner, builder)
+    menuBuilder = builder
+    builder(owner, menu)
+end}
 reset()
 F.AttachBankControls()
-local depositButton, withdrawButton
-for _, w in ipairs(widgets) do
-    if w.arrowTexture and w.arrowTexture:find('Down') then depositButton = w end
-    if w.arrowTexture and w.arrowTexture:find('UpButton') then withdrawButton = w end
-end
+local depositButton, withdrawButton = buttons.Deposit, buttons.Withdraw
+filterWidget = buttons.Filter
 check(depositButton.template == 'UIPanelButtonTemplate' and withdrawButton.template == 'UIPanelButtonTemplate', 'native button templates')
-check(#widgets == 5, 'two action buttons and dropdown; no standalone stop widget')
+check(#widgets == 5 and filterWidget.template == 'UIPanelButtonTemplate', 'three native text buttons; no standalone stop widget')
 check(BankFrame.height == 460 and BankFrame.BankPanel.point[1] == 'LEFT', 'bank and item panel retain native size and anchors')
 check(BankFrame.BankItemSearchBox.point[4] == -56 and BankFrame.BankItemSearchBox.point[5] == -33, 'search retains native anchor')
-check(filterWidget.point[2] == BankFrame.BankItemSearchBox and filterWidget.point[4] == -8, 'filter anchors left of search without moving it')
-check(withdrawButton.point[2] == filterWidget and depositButton.point[2] == withdrawButton, 'compact transfer icons sit left of filter')
+check(withdrawButton.point[2] == BankFrame.BankItemSearchBox and withdrawButton.point[4] == -8, 'withdraw anchors left of search without moving it')
+check(filterWidget.point[2] == depositButton and depositButton.point[2] == withdrawButton, 'left-to-right order is Filter, Deposit, Withdraw')
 local totalWidth = depositButton.width + withdrawButton.width + filterWidget.width + 4 + 4 + 8
 check(480 - 56 - 110 - totalWidth >= 78, 'compact controls clear portrait at smallest native bank width')
 check(33 + filterWidget.height < 63, 'controls fit above native item grid')
@@ -255,13 +245,14 @@ hooks.SetTab()
 check(BankFrame.height == 695 and BankFrame.BankPanel.height == 695, 'page and tab refresh leave native geometry untouched')
 check(hooks.GenerateItemSlotsForSelectedTab == nil, 'no native item layout hook')
 check(not depositButton.enabled, 'no selection disables transfer buttons')
-menuBuilder(nil, menu)
+filterWidget.scripts.OnClick(filterWidget)
+check(menuBuilder ~= nil and menu.title == 'Transfer item types: Item types', 'Filter button opens native checkbox menu with selection summary')
 entries.Herbs.click()
 check(entries.Herbs.selected() and depositButton.enabled, 'checkbox updates saved filter and controls')
-check(filterWidget.text == 'Herbs', 'single subtype uses its name')
+check(F.FilterSummary() == 'Herbs', 'single subtype uses its name')
 entries['Select all'].click()
 check(F.FilterCount() == #F.categories + #F.tradeCategories - 1, 'select all')
-check(filterWidget.text == 'All item types', 'full selection uses compact summary')
+check(F.FilterSummary() == 'All item types', 'full selection uses compact summary')
 entries.Herbs.click()
 check(not F.Matches(100) and F.Matches(104) and not entries['Trade goods'].selected(), 'unchecking subtype after select all excludes it')
 entries['Trade goods'].click()
@@ -269,25 +260,27 @@ check(F.Matches(100) and entries['Trade goods'].selected(), 'parent checkbox sel
 entries['Clear all'].click()
 check(F.FilterCount() == 0 and not withdrawButton.enabled, 'clear all')
 entries['Trade goods'].click()
-check(filterWidget.text == 'Trade goods', 'all trade subtypes summarize as trade goods')
+check(F.FilterSummary() == 'Trade goods', 'all trade subtypes summarize as trade goods')
+filterWidget.scripts.OnClick(filterWidget)
+check(menu.title == 'Transfer item types: Trade goods' and filterWidget.text == 'Filter', 'selection appears inside menu while button retains fixed label')
 entries.Consumables.click()
-check(filterWidget.text == 'Consumables +1', 'multiple groups collapse trade subtypes into one group')
+check(F.FilterSummary() == 'Consumables +1', 'multiple groups collapse trade subtypes into one group')
 entries['Clear all'].click()
-check(filterWidget.text == 'Item types', 'empty selection restores prompt')
+check(F.FilterSummary() == 'Item types', 'empty selection restores prompt')
 F.filters.tradegoods = true
 bags[0] = {item(100), item(104)}
 depositButton.scripts.OnClick()
-check(depositButton.Icon.path:find('WHITE8X8') and depositButton.Icon.width == 8 and depositButton.enabled and not withdrawButton.enabled, 'deposit becomes enabled stop square; opposite action disabled')
+check(depositButton.text == 'Stop transfer' and depositButton.enabled and not withdrawButton.enabled, 'deposit becomes enabled stop; opposite action disabled')
 check(not filterWidget.enabled, 'filter disabled during transfer')
 depositButton.scripts.OnClick()
 drain()
-check(#uses == 1 and depositButton.Icon.path:find('ScrollDownButton') and depositButton.Icon.width == 20 and withdrawButton.enabled, 'deposit button cancels and restores idle controls')
+check(#uses == 1 and depositButton.text == 'Deposit' and withdrawButton.enabled, 'deposit button cancels and restores idle controls')
 bags[6] = {item(100), item(104)}
 withdrawButton.scripts.OnClick()
-check(withdrawButton.Icon.path:find('WHITE8X8') and withdrawButton.enabled and not depositButton.enabled, 'withdraw becomes enabled stop square')
+check(withdrawButton.text == 'Stop transfer' and withdrawButton.enabled and not depositButton.enabled, 'withdraw becomes enabled stop')
 withdrawButton.scripts.OnClick()
 drain()
-check(#uses == 2 and withdrawButton.Icon.path:find('ScrollUpButton') and depositButton.enabled, 'withdraw button cancels and restores idle controls')
+check(#uses == 2 and withdrawButton.text == 'Withdraw' and depositButton.enabled, 'withdraw button cancels and restores idle controls')
 bags[0] = {item(100), item(104)}
 depositButton.scripts.OnClick()
 hooks.OnHide()

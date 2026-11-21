@@ -1,14 +1,14 @@
 # ForeverQoL
 
-Small quality-of-life improvements for WoW Forever. The first module adds compact **Deposit** (down arrow) and **Withdraw** (up arrow) buttons plus an **Item types** dropdown immediately left of Blizzard's bank search box. Hover an arrow for its action tooltip. The addon uses Blizzard's button and dropdown templates and leaves the native bank size, artwork, search, item panel and other controls untouched.
+Small quality-of-life improvements for WoW Forever. The bank header has three compact text buttons, ordered **Filter**, **Deposit**, **Withdraw**, immediately left of Blizzard's search box. Filter opens a native checkbox menu. The addon leaves the native bank size, artwork, search, item panel and other controls untouched.
 
 Choose the item types to move, then click Deposit or Withdraw. No types are selected on a new installation. Selections are saved between sessions and shared by both buttons. Trade goods can be selected together or narrowed to cloth, leather, metal and stone, herbs, elemental materials, enchanting materials, and other trade goods through the submenu. The parent Trade goods checkbox selects or clears all its subtypes; unchecking a subtype excludes it.
 
 Transfers apply to the selected character or account bank and use all its purchased storage, across pages. Deposit moves items from equipped bags; Withdraw moves items back into bags. Equipped gear is excluded. The existing bank search box filters the display only; it does not narrow transfers.
 
-The filter summarizes a complete trade-goods selection as **Trade goods**, individual selections by name, and all types as **All item types**. Multiple selected groups use the first name and a count of additional groups.
+The Filter tooltip and menu heading summarize a complete trade-goods selection as **Trade goods**, individual selections by name, and all types as **All item types**. Multiple selected groups use the first name and a count of additional groups. The button always reads **Filter**.
 
-The addon processes one stack at a time and reports the confirmed item count. During a transfer, the active arrow becomes a red **Stop transfer** square; the other action and filter are disabled. Clicking it, closing the bank, changing bank type, entering combat, or holding an item on the cursor stops the operation. A move that makes no progress stops after two seconds, including full storage and server restrictions. Locked items and items without type information are skipped. Refundable items are skipped when depositing to the account bank to preserve their refund window.
+The addon processes one stack at a time and reports the confirmed item count. During a transfer, the active Deposit or Withdraw button reads **Stop transfer**; the other action and filter are disabled. Clicking it, closing the bank, changing bank type, entering combat, or holding an item on the cursor stops the operation. A move that makes no progress stops after two seconds, including full storage and server restrictions. Locked items and items without type information are skipped. Refundable items are skipped when depositing to the account bank to preserve their refund window.
 
 Use `/fql` or `/foreverqol` to see the loaded version. After installing a development build, `/reload` and check `/fql` for its exact identifier.
 
