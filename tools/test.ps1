@@ -9,6 +9,8 @@ if (-not $LuaPath) {
 if (-not (Test-Path -LiteralPath $LuaPath)) { throw 'Supply Lua 5.1+ using -LuaPath or FOREVERQOL_LUA.' }
 & $LuaPath (Join-Path $root 'tests/run.lua') $root
 if ($LASTEXITCODE -ne 0) { throw 'ForeverQoL regression tests failed.' }
+& $LuaPath (Join-Path $root 'tests/quest-items.lua') $root
+if ($LASTEXITCODE -ne 0) { throw 'Quest-item regression tests failed.' }
 $addon = Join-Path $root 'addon/ForeverQoL'
 foreach ($file in Get-ChildItem -LiteralPath $addon -Filter '*.lua') {
     $env:FOREVERQOL_PARSE_FILE = $file.FullName

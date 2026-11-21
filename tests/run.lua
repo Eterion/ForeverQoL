@@ -338,6 +338,7 @@ drain()
 check(#uses == 3, 'bank hide hook cancels queue')
 
 C_AddOns = {GetAddOnMetadata = function() return '0.1.0' end}
+F.QuestItems = {Initialize = function() end}
 SlashCmdList = {}
 assert(loadfile(root .. '/addon/ForeverQoL/Core.lua'))('ForeverQoL', F)
 check(F.version == '0.1.0' and type(SlashCmdList.FOREVERQOL) == 'function', 'public version and slash command')

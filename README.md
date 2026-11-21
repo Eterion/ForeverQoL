@@ -12,11 +12,25 @@ The addon processes one stack at a time and reports the confirmed item count. Du
 
 Use `/fql` or `/foreverqol` to see the loaded version. After installing a development build, `/reload` and check `/fql` for its exact identifier.
 
+## Leftover quest items
+
+Bag items receive a small marker in their upper-right corner when they have no remaining known quest use:
+
+- A red **x** means all known related quests have been turned in.
+- An amber **?** means their unfinished related quests were removed from the log, for example by abandonment. They can be needed again if those quests are accepted again.
+
+Hover the item for an explanation and the related quest names and IDs. Markers update when quests or bags change and disappear when an item becomes relevant again. Both Blizzard's combined and individual bag views are supported. Custom bag replacements are not currently supported.
+
+The addon bundles 3,616 item associations covering 3,534 quest records from the pinned Forever QuestieDB data, unioned across all nine supported classes and both factions. QuestieDB and QuestsStarts do not need to be installed. The marker is conservative: active quests, repeatable quests, unfinished future/shared uses, missing quest metadata and unknown items prevent an obsolete marker. Ordinary crafting materials and spell-learning items are excluded. Five unresolved source quest links are retained as blockers rather than discarded.
+
+Completed uses can be recognized immediately after installation. Quest removal is recorded only from events observed while this addon is running, and saved separately for each character; absence from the quest log alone is not evidence. The tooltip describes known quest relevance, not a guarantee that an item has no other purpose. The addon never sells or deletes these items.
+
 ## Development
 
 - `./tools/test.ps1` runs Lua regression tests, syntax checks, and TOC validation. Supply `-LuaPath` or `FOREVERQOL_LUA` if Lua is not on PATH. Locally the sibling QuestsStarts Lua runtime is also recognized.
 - `./tools/deploy.ps1` installs and verifies a numbered development build in `C:\Games\World of Warcraft\_forever_\Interface\AddOns\ForeverQoL`. Use `-AddOnsPath` for another installation or a deploy rehearsal. The source TOC stays at the public version baseline.
 - `./tools/package.ps1` validates and creates `dist/vVERSION/ForeverQoL-VERSION.zip` and `release.json` (Camelot flavor), without local build identifiers.
+- `./tools/build-quest-items.ps1 -Upstream PATH` rebuilds quest-item data from the clean revision in `tools/upstream-revision.txt`. Locally the QuestsStarts `work/QuestieDB` checkout can be used. Release CI fetches the pin into this project's `work/QuestieDB`, rebuilds all 18 profiles and rejects generated differences. Source licensing and provenance ship in the addon.
 - Public releases require an explicit owner request and the manual **Release ForeverQoL** GitHub Actions workflow. The initial version baseline is `0.1.0`; no public release has been published.
 
 ## Client reference and validation
@@ -26,3 +40,5 @@ Bank API and layout reference: the [Forever client bank UI](https://github.com/G
 Forever exposes `C_Bank.AutoDepositItemsIntoBank(bankType)` and `C_Bank.DoesBankTypeSupportAutoDeposit(bankType)`. The bulk deposit call has no per-call item filter or cancellation argument, so this module uses native `C_Container.UseContainerItem` calls to preserve its checkbox selection and stoppable queue. It does not change Blizzard's bank-tab deposit settings.
 
 Offline tests cover filtering, deposit/withdraw routing, bag coverage, account-bank restrictions, cancellation, stale slots, failed moves, counts, and native widget/menu construction. In-game appearance, server permissions for timer-driven transfers, partial-stack behavior, account-bank restrictions and taint/combat interactions require live verification. Check both bank types, full inventory/bank, bank closure mid-transfer, reload persistence and `/fql` before the first release.
+
+Quest-item tests cover generated-data integrity, completion and abandonment reasons, shared/future/repeatable uses, native active-use safeguards, missing data, recycled slots, tooltip output, character separation and event races. Live verification remains necessary for marker positioning, tooltip integration, turn-in/abandon/reaccept refreshes and client quest-history behavior.

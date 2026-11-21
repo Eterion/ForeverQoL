@@ -7,4 +7,6 @@
 ## SavedVariables: ForeverQoLDB
 Filters.lua
 Bank.lua
+QuestItemData.lua
+QuestItems.lua
 Core.lua
