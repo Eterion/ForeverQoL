@@ -64,13 +64,18 @@ CreateFrame = function()
 end
 local button = {
     GetBagID = function() return 0 end, GetID = function() return 1 end,
-    CreateFontString = function()
-        marker = {SetPoint = function() end, SetText = function(self, text) self.text = text end,
-            SetTextColor = function() end, Show = function(self) self.shown = true end,
+    CreateTexture = function(_, _, layer, _, sublevel)
+        marker = {layer = layer, sublevel = sublevel,
+            SetPoint = function(self, ...) self.point = {...} end,
+            SetSize = function(self, width, height) self.width, self.height = width, height end,
+            SetAtlas = function(self, atlas) self.atlas = atlas; self.texture = nil end,
+            SetTexture = function(self, texture) self.texture = texture; self.atlas = nil end,
+            Show = function(self) self.shown = true end,
             Hide = function(self) self.shown = false end}
         return marker
     end,
 }
+C_Texture = {GetAtlasInfo = function() return {} end}
 local bagFrame = {IsShown = function() return true end, EnumerateValidItems = function() return ipairs({button}) end}
 ContainerFrameUtil_EnumerateContainerFrames = function() return ipairs({bagFrame}) end
 ContainerFrame_GenerateFrame = function() end
@@ -90,12 +95,15 @@ drain()
 check(Q.GetStatus(0, 1) == nil, 'unstarted or future quest is not obsolete')
 completed[1] = true
 local status = Q.GetStatus(0, 1)
-check(status and not status.removed and status.details[1]:find('Localized quest %(#1%)'), 'completed use explains exact quest with localized title')
+check(status and not status.removed and status.details[1] == 'Completed: Localized quest.', 'completed use names localized quest without quest ID')
 Q.RefreshButtons()
-check(marker and marker.shown and marker.text == 'x', 'obsolete quest item gets bag marker')
+check(marker and marker.shown and marker.atlas == 'common-icon-redx', 'obsolete quest item gets native red cross badge')
+check(marker.width == 20 and marker.height == 20 and marker.point[1] == 'TOPLEFT'
+    and marker.layer == 'OVERLAY' and marker.sublevel == 7, 'badge uses upgrade-style corner footprint above item art')
 check(type(hooks.UpdateQuestItem) == 'function' and type(hooks.SetBagItem) == 'function', 'hooks native item refresh and bag tooltip')
 hooks.SetBagItem(tooltip, 0, 1)
 check(table.concat(tooltip.lines, '\n'):find('All known quests') and table.concat(tooltip.lines, '\n'):find('Completed:'), 'tooltip explains evidence and limited scope')
+check(not table.concat(tooltip.lines, '\n'):find('#1'), 'tooltip does not append quest IDs')
 active[1] = true
 check(Q.GetStatus(0, 1) == nil, 'active use overrides completed history')
 hooks.UpdateQuestItem(button)
@@ -135,7 +143,15 @@ drain()
 status = Q.GetStatus(0, 1)
 check(status and status.removed and status.details[1]:find('Removed from log:'), 'explicit removal records removed quest with reason')
 Q.RefreshButtons()
-check(marker.text == '?' and marker.shown, 'removed use gets distinct uncertain marker')
+check(marker.atlas == 'services-icon-warning' and marker.shown, 'removed use gets native amber warning badge')
+C_Texture.GetAtlasInfo = function() return nil end
+Q.UpdateButton(button)
+check(marker.shown and marker.texture:find('UI%-Dialog%-Icon%-AlertNew'), 'missing warning atlas falls back to Blizzard warning artwork')
+completed[1] = true
+Q.UpdateButton(button)
+check(marker.shown and marker.texture:find('UI%-GroupLoot%-Pass%-Up'), 'missing cross atlas falls back to Blizzard pass artwork')
+completed[1] = nil
+C_Texture.GetAtlasInfo = function() return {} end
 Q.OnEvent(nil, 'QUEST_ACCEPTED', 1)
 drain()
 check(Q.GetStatus(0, 1) == nil, 'accepting again clears removed state')

@@ -14,12 +14,12 @@ Use `/fql` or `/foreverqol` to see the loaded version. After installing a develo
 
 ## Leftover quest items
 
-Bag items receive a small marker in their upper-right corner when they have no remaining known quest use:
+Bag items receive a textured badge in their upper-left corner, similar in size and placement to Blizzard's equipment-upgrade marker, when they have no remaining known quest use:
 
-- A red **x** means all known related quests have been turned in.
-- An amber **?** means their unfinished related quests were removed from the log, for example by abandonment. They can be needed again if those quests are accepted again.
+- A **red cross** means all known related quests have been turned in.
+- An **amber warning triangle** means their unfinished related quests were removed from the log, for example by abandonment. They can be needed again if those quests are accepted again.
 
-Hover the item for an explanation and the related quest names and IDs. Markers update when quests or bags change and disappear when an item becomes relevant again. Both Blizzard's combined and individual bag views are supported. Custom bag replacements are not currently supported.
+Hover the item for an explanation and the related quest names, without IDs. Markers update when quests or bags change and disappear when an item becomes relevant again. Both Blizzard's combined and individual bag views are supported. Custom bag replacements are not currently supported.
 
 The addon bundles 3,616 item associations covering 3,534 quest records from the pinned Forever QuestieDB data, unioned across all nine supported classes and both factions. QuestieDB and QuestsStarts do not need to be installed. The marker is conservative: active quests, repeatable quests, unfinished future/shared uses, missing quest metadata and unknown items prevent an obsolete marker. Ordinary crafting materials and spell-learning items are excluded. Five unresolved source quest links are retained as blockers rather than discarded.
 

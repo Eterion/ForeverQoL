@@ -52,8 +52,8 @@ function Q.GetStatus(bag, slot)
             or C_QuestLog.IsOnQuest(id) then return nil end
         local done = Completed(id)
         if not done and not Q.state.removed[id] then return nil end
-        local title = C_QuestLog.GetTitleForQuestID(id) or quest.name or ('Quest ' .. id)
-        details[#details + 1] = (done and 'Completed: ' or 'Removed from log: ') .. title .. ' (#' .. id .. ').'
+        local title = C_QuestLog.GetTitleForQuestID(id) or quest.name or 'Related quest'
+        details[#details + 1] = (done and 'Completed: ' or 'Removed from log: ') .. title .. '.'
         if not done then removed = true end
     end
     return { removed = removed, details = details,
@@ -78,15 +78,23 @@ end
 function Q.UpdateButton(button)
     local status = Q.GetStatus(button:GetBagID(), button:GetID())
     if status and not button.ForeverQoLQuestMarker then
-        local marker = button:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
-        marker:SetPoint('TOPRIGHT', button, 'TOPRIGHT', -2, -1)
+        -- Match the upgrade badge's corner-overlay treatment, using different
+        -- Blizzard artwork instead of font glyphs or the green upgrade arrow.
+        local marker = button:CreateTexture(nil, 'OVERLAY', nil, 7)
+        marker:SetSize(20, 20)
+        marker:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
         button.ForeverQoLQuestMarker = marker
     end
     local marker = button.ForeverQoLQuestMarker
     if marker then
         if status then
-            marker:SetText(status.removed and '?' or 'x')
-            marker:SetTextColor(1, status.removed and 0.75 or 0.25, 0.15)
+            local atlas = status.removed and 'services-icon-warning' or 'common-icon-redx'
+            if C_Texture.GetAtlasInfo(atlas) then
+                marker:SetAtlas(atlas)
+            else
+                marker:SetTexture(status.removed and 'Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew'
+                    or 'Interface\\Buttons\\UI-GroupLoot-Pass-Up')
+            end
             marker:Show()
         else
             marker:Hide()
