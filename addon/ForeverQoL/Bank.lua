@@ -1,6 +1,5 @@
 local _, F = ...
 local job, controls
-local toolbarHeight = 34
 
 local function ActiveBank()
     if not BankFrame or not BankFrame:IsShown() then return nil end
@@ -15,22 +14,18 @@ end
 function F.RefreshControls()
     if not controls then return end
     local enabled = Available(ActiveBank()) and F.FilterCount() > 0
-    controls.deposit:SetText(job and job.deposit and 'Stop transfer' or 'Deposit')
-    controls.withdraw:SetText(job and not job.deposit and 'Stop transfer' or 'Withdraw')
-    controls.deposit:SetEnabled(job and job.deposit or (not job and enabled) or false)
-    controls.withdraw:SetEnabled(job and not job.deposit or (not job and enabled) or false)
+    for _, key in ipairs({ 'deposit', 'withdraw' }) do
+        local button = controls[key]
+        local stopping = job and job.deposit == (key == 'deposit')
+        local canClick = stopping or (not job and enabled) or false
+        button:SetEnabled(canClick)
+        button.Icon:SetTexture(stopping and 'Interface\\Buttons\\WHITE8X8' or button.arrowTexture)
+        button.Icon:SetSize(stopping and 8 or 20, stopping and 8 or 20)
+        button.Icon:SetVertexColor(stopping and 1 or 0.9, stopping and 0.4 or 0.9, stopping and 0.3 or 0.9)
+        button.Icon:SetAlpha(canClick and 1 or 0.4)
+    end
     controls.filter:SetEnabled(not job)
     controls.filter:SetDefaultText(F.FilterSummary())
-end
-
-function F.LayoutBankControls()
-    if not controls then return end
-    local panel = BankFrame.BankPanel
-    -- Blizzard recalculates this height on page changes. Derive the outer height
-    -- from that unmodified panel height so repeated layouts cannot accumulate.
-    panel:ClearAllPoints()
-    panel:SetPoint('TOPLEFT', BankFrame, 'TOPLEFT', 0, -toolbarHeight)
-    BankFrame:SetHeight(panel:GetHeight() + toolbarHeight)
 end
 
 function F.StopTransfer(reason)
@@ -117,20 +112,23 @@ local function Tooltip(button, text, deposit)
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         local stopping = job and job.deposit == deposit
-        GameTooltip:SetText(stopping and 'Stop the current transfer. Items already moved stay in their destination.' or text, 1, 1, 1, 1, true)
+        GameTooltip:SetText(stopping and 'Stop transfer' or (deposit and 'Deposit' or 'Withdraw'))
+        GameTooltip:AddLine(stopping and 'Stop the current transfer. Items already moved stay in their destination.' or text, 1, 1, 1, true)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
 function F.AttachBankControls()
-    if controls or not BankFrame or not BankFrame.BankPanel or not F.filters then return end
+    if controls or not BankFrame or not BankFrame.BankItemSearchBox or not F.filters then return end
     controls = {}
-    local function Button(key, text, width, x, y, action)
+    local function Button(key, arrow, action)
         local button = CreateFrame("Button", nil, BankFrame, "UIPanelButtonTemplate")
-        button:SetSize(width, 22)
-        button:SetPoint("TOPLEFT", BankFrame, "TOPLEFT", x, y)
-        button:SetText(text)
+        button:SetSize(24, 22)
+        button:SetText('')
+        button.arrowTexture = 'Interface\\Buttons\\UI-ScrollBar-Scroll' .. arrow .. 'Button-Up'
+        button.Icon = button:CreateTexture(nil, 'OVERLAY')
+        button.Icon:SetPoint('CENTER')
         button:SetScript("OnClick", action)
         controls[key] = button
         return button
@@ -142,13 +140,17 @@ function F.AttachBankControls()
             F.StartTransfer(deposit)
         end
     end
-    Tooltip(Button("deposit", "Deposit", 110, 20, -64, function() Action(true) end),
+    Tooltip(Button("deposit", "Down", function() Action(true) end),
         "Deposit matching items from your bags into the selected bank. Uses all purchased storage in that bank.", true)
-    Tooltip(Button("withdraw", "Withdraw", 110, 134, -64, function() Action(false) end),
+    Tooltip(Button("withdraw", "Up", function() Action(false) end),
         "Withdraw matching items from all purchased storage in the selected bank into your bags.", false)
     local dropdown = CreateFrame("DropdownButton", nil, BankFrame, "WowStyle1DropdownTemplate")
-    dropdown:SetSize(200, 22)
-    dropdown:SetPoint("LEFT", controls.withdraw, "RIGHT", 4, 0)
+    dropdown:SetSize(142, 22)
+    -- Fit only our widgets into the existing header. All Blizzard anchors and
+    -- dimensions remain owned by Blizzard, including the background artwork.
+    dropdown:SetPoint('RIGHT', BankFrame.BankItemSearchBox, 'LEFT', -8, 0)
+    controls.withdraw:SetPoint('RIGHT', dropdown, 'LEFT', -4, 0)
+    controls.deposit:SetPoint('RIGHT', controls.withdraw, 'LEFT', -4, 0)
     controls.filter = dropdown
     dropdown:SetupMenu(function(_, root)
         root:CreateTitle("Transfer item types")
@@ -179,13 +181,10 @@ function F.AttachBankControls()
         end
     end)
     BankFrame:HookScript("OnHide", function() F.StopTransfer("Bank closed.") end)
-    BankFrame:HookScript("OnShow", function() F.LayoutBankControls(); F.RefreshControls() end)
-    hooksecurefunc(BankFrame.BankPanel, 'GenerateItemSlotsForSelectedTab', F.LayoutBankControls)
+    BankFrame:HookScript("OnShow", F.RefreshControls)
     hooksecurefunc(BankFrame, "SetTab", function()
         if job then F.StopTransfer("Bank changed.") end
-        F.LayoutBankControls()
         F.RefreshControls()
     end)
-    F.LayoutBankControls()
     F.RefreshControls()
 end

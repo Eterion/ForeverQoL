@@ -7,3 +7,4 @@
 - Publish only when the owner explicitly requests a release, through the manual GitHub Actions workflow. Commits, pushes and local installs do not trigger releases.
 - Bump the public version once per release based on changes since the previous public release: patch for fixes only, minor for new features. Development deployments do not consume public versions.
 - Preserve native Blizzard styling and keep modules independent as quality-of-life features grow.
+- Bank controls must fit the existing header. Do not resize or reanchor Blizzard's bank, item panel, search, artwork or other native controls to make room.

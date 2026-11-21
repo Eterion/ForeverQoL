@@ -189,6 +189,15 @@ local function widget(kind, template)
     function w:SetEnabled(value) self.enabled = value end
     function w:SetShown(value) self.shown = value end
     function w:SetDefaultText(value) self.text = value end
+    function w:CreateTexture()
+        local texture = {}
+        function texture:SetPoint() end
+        function texture:SetTexture(path) self.path = path end
+        function texture:SetSize(width, height) self.width, self.height = width, height end
+        function texture:SetVertexColor() end
+        function texture:SetAlpha(value) self.alpha = value end
+        return texture
+    end
     function w:SetupMenu(fn) menuBuilder = fn; filterWidget = self end
     function w:RegisterEvent() end
     if kind == 'Frame' then eventFrame = w end
@@ -197,7 +206,17 @@ end
 CreateFrame = function(kind, _, _, template) return widget(kind, template) end
 BankFrame.BankPanel = widget('Frame')
 BankFrame.BankPanel:SetSize(480, 460)
-BankFrame.SetHeight = function(self, height) self.height = height end
+BankFrame.BankPanel:SetPoint('LEFT', BankFrame, 'LEFT', 0, 0)
+BankFrame.BankItemSearchBox = widget('EditBox')
+BankFrame.BankItemSearchBox:SetSize(110, 20)
+BankFrame.BankItemSearchBox:SetPoint('TOPRIGHT', BankFrame, 'TOPRIGHT', -56, -33)
+BankFrame.height = 460
+local function forbiddenMutation() error('addon attempted to move or resize native Blizzard UI') end
+for _, native in ipairs({BankFrame, BankFrame.BankPanel, BankFrame.BankItemSearchBox}) do
+    for _, method in ipairs({'SetHeight', 'SetWidth', 'SetSize', 'SetPoint', 'ClearAllPoints'}) do
+        native[method] = forbiddenMutation
+    end
+end
 BankFrame.HookScript = function(_, event, fn) hooks[event] = fn end
 hooksecurefunc = function(_, name, fn) hooks[name] = fn end
 MenuResponse = {Refresh = 1}
@@ -215,21 +234,30 @@ function menu:CreateCheckbox(label, selected, click)
 end
 reset()
 F.AttachBankControls()
-check(buttons.Deposit.template == 'UIPanelButtonTemplate' and buttons.Withdraw.template == 'UIPanelButtonTemplate', 'native button templates')
-local depositButton, withdrawButton = buttons.Deposit, buttons.Withdraw
-check(#widgets == 4, 'two action buttons and dropdown; no standalone stop widget')
-check(BankFrame.height == 494 and BankFrame.BankPanel.point[5] == -34, 'toolbar reserves height above native item grid')
-check(depositButton.point[5] == -64 and depositButton.point[5] - depositButton.height > -97, 'toolbar below search and above shifted first slot')
-check(248 + filterWidget.width <= 480 - 20, 'toolbar fits narrow Forever bank width')
-F.LayoutBankControls()
-check(BankFrame.height == 494, 'layout does not grow on repeated refresh')
+local depositButton, withdrawButton
+for _, w in ipairs(widgets) do
+    if w.arrowTexture and w.arrowTexture:find('Down') then depositButton = w end
+    if w.arrowTexture and w.arrowTexture:find('UpButton') then withdrawButton = w end
+end
+check(depositButton.template == 'UIPanelButtonTemplate' and withdrawButton.template == 'UIPanelButtonTemplate', 'native button templates')
+check(#widgets == 5, 'two action buttons and dropdown; no standalone stop widget')
+check(BankFrame.height == 460 and BankFrame.BankPanel.point[1] == 'LEFT', 'bank and item panel retain native size and anchors')
+check(BankFrame.BankItemSearchBox.point[4] == -56 and BankFrame.BankItemSearchBox.point[5] == -33, 'search retains native anchor')
+check(filterWidget.point[2] == BankFrame.BankItemSearchBox and filterWidget.point[4] == -8, 'filter anchors left of search without moving it')
+check(withdrawButton.point[2] == filterWidget and depositButton.point[2] == withdrawButton, 'compact transfer icons sit left of filter')
+local totalWidth = depositButton.width + withdrawButton.width + filterWidget.width + 4 + 4 + 8
+check(480 - 56 - 110 - totalWidth >= 78, 'compact controls clear portrait at smallest native bank width')
+check(33 + filterWidget.height < 63, 'controls fit above native item grid')
 BankFrame.BankPanel.height = 695
-hooks.GenerateItemSlotsForSelectedTab()
-check(BankFrame.height == 729, 'layout follows native page height changes')
-check(not buttons.Deposit.enabled, 'no selection disables transfer buttons')
+BankFrame.height = 695
+hooks.OnShow()
+hooks.SetTab()
+check(BankFrame.height == 695 and BankFrame.BankPanel.height == 695, 'page and tab refresh leave native geometry untouched')
+check(hooks.GenerateItemSlotsForSelectedTab == nil, 'no native item layout hook')
+check(not depositButton.enabled, 'no selection disables transfer buttons')
 menuBuilder(nil, menu)
 entries.Herbs.click()
-check(entries.Herbs.selected() and buttons.Deposit.enabled, 'checkbox updates saved filter and controls')
+check(entries.Herbs.selected() and depositButton.enabled, 'checkbox updates saved filter and controls')
 check(filterWidget.text == 'Herbs', 'single subtype uses its name')
 entries['Select all'].click()
 check(F.FilterCount() == #F.categories + #F.tradeCategories - 1, 'select all')
@@ -239,7 +267,7 @@ check(not F.Matches(100) and F.Matches(104) and not entries['Trade goods'].selec
 entries['Trade goods'].click()
 check(F.Matches(100) and entries['Trade goods'].selected(), 'parent checkbox selects all subtypes')
 entries['Clear all'].click()
-check(F.FilterCount() == 0 and not buttons.Withdraw.enabled, 'clear all')
+check(F.FilterCount() == 0 and not withdrawButton.enabled, 'clear all')
 entries['Trade goods'].click()
 check(filterWidget.text == 'Trade goods', 'all trade subtypes summarize as trade goods')
 entries.Consumables.click()
@@ -249,17 +277,17 @@ check(filterWidget.text == 'Item types', 'empty selection restores prompt')
 F.filters.tradegoods = true
 bags[0] = {item(100), item(104)}
 depositButton.scripts.OnClick()
-check(depositButton.text == 'Stop transfer' and depositButton.enabled and not withdrawButton.enabled, 'deposit becomes enabled stop; opposite action disabled')
+check(depositButton.Icon.path:find('WHITE8X8') and depositButton.Icon.width == 8 and depositButton.enabled and not withdrawButton.enabled, 'deposit becomes enabled stop square; opposite action disabled')
 check(not filterWidget.enabled, 'filter disabled during transfer')
 depositButton.scripts.OnClick()
 drain()
-check(#uses == 1 and depositButton.text == 'Deposit' and withdrawButton.enabled, 'deposit button cancels and restores idle controls')
+check(#uses == 1 and depositButton.Icon.path:find('ScrollDownButton') and depositButton.Icon.width == 20 and withdrawButton.enabled, 'deposit button cancels and restores idle controls')
 bags[6] = {item(100), item(104)}
 withdrawButton.scripts.OnClick()
-check(withdrawButton.text == 'Stop transfer' and withdrawButton.enabled and not depositButton.enabled, 'withdraw becomes enabled stop')
+check(withdrawButton.Icon.path:find('WHITE8X8') and withdrawButton.enabled and not depositButton.enabled, 'withdraw becomes enabled stop square')
 withdrawButton.scripts.OnClick()
 drain()
-check(#uses == 2 and withdrawButton.text == 'Withdraw' and depositButton.enabled, 'withdraw button cancels and restores idle controls')
+check(#uses == 2 and withdrawButton.Icon.path:find('ScrollUpButton') and depositButton.enabled, 'withdraw button cancels and restores idle controls')
 bags[0] = {item(100), item(104)}
 depositButton.scripts.OnClick()
 hooks.OnHide()
