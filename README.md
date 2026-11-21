@@ -31,7 +31,7 @@ Completed uses can be recognized immediately after installation. Quest removal i
 - `./tools/deploy.ps1` installs and verifies a numbered development build in `C:\Games\World of Warcraft\_forever_\Interface\AddOns\ForeverQoL`. Use `-AddOnsPath` for another installation or a deploy rehearsal. The source TOC stays at the public version baseline.
 - `./tools/package.ps1` validates and creates `dist/vVERSION/ForeverQoL-VERSION.zip` and `release.json` (Camelot flavor), without local build identifiers.
 - `./tools/build-quest-items.ps1 -Upstream PATH` rebuilds quest-item data from the clean revision in `tools/upstream-revision.txt`. Locally the QuestsStarts `work/QuestieDB` checkout can be used. Release CI fetches the pin into this project's `work/QuestieDB`, rebuilds all 18 profiles and rejects generated differences. Source licensing and provenance ship in the addon.
-- Public releases require an explicit owner request and the manual **Release ForeverQoL** GitHub Actions workflow. The initial version baseline is `0.1.0`; no public release has been published.
+- Public releases require an explicit owner request and the manual **Release ForeverQoL** GitHub Actions workflow. The first public version is `0.1.0`; development deployments do not consume version numbers.
 
 ## Client reference and validation
 
