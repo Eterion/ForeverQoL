@@ -6,9 +6,10 @@ load('QuestItemData.lua')
 local generated = F.QuestItemData
 local itemCount, questCount, links, missing = 0, 0, 0, 0
 for id, item in pairs(generated.items) do
-    check(type(id) == 'number' and #item.quests > 0, 'generated item requires associations')
+    check(type(id) == 'number' and #item >= 3 and type(item[2]) == 'boolean', 'compact item requires associations and spell flag')
     local last = 0
-    for _, quest in ipairs(item.quests) do
+    for index = 3, #item do
+        local quest = item[index]
         check(quest > last, 'associations sorted and deduplicated')
         last = quest
         links = links + 1
@@ -17,7 +18,7 @@ for id, item in pairs(generated.items) do
     itemCount = itemCount + 1
 end
 for id, quest in pairs(generated.quests) do
-    check(type(id) == 'number' and type(quest.name) == 'string' and type(quest.repeatable) == 'boolean', 'generated quest schema')
+    check(type(id) == 'number' and type(quest[1]) == 'string' and type(quest[2]) == 'boolean', 'compact quest schema')
     questCount = questCount + 1
 end
 check(itemCount > 3000 and questCount > 3000, 'Forever data coverage must not silently collapse')
@@ -30,18 +31,18 @@ local function reset()
 end
 reset()
 F.QuestItemData = {items = {
-    [100] = {class = 12, quests = {1}},
-    [101] = {class = 12, quests = {1,2}},
-    [102] = {class = 12, quests = {3}},
-    [103] = {class = 7, quests = {1}},
-    [104] = {class = 12, quests = {999}},
-    [105] = {class = 12, teachesSpell = true, quests = {1}},
-    [106] = {class = 12, quests = {1,4}},
+    [100] = {12, false, 1},
+    [101] = {12, false, 1, 2},
+    [102] = {12, false, 3},
+    [103] = {7, false, 1},
+    [104] = {12, false, 999},
+    [105] = {12, true, 1},
+    [106] = {12, false, 1, 4},
 }, quests = {
-    [1] = {name = 'One quest', repeatable = false},
-    [2] = {name = 'Later quest', repeatable = false},
-    [3] = {name = 'Repeat quest', repeatable = true},
-    [4] = {name = 'Other quest', repeatable = false},
+    [1] = {'One quest', false},
+    [2] = {'Later quest', false},
+    [3] = {'Repeat quest', true},
+    [4] = {'Other quest', false},
 }}
 C_QuestLog = {
     IsQuestFlaggedCompleted = function(id) return completed[id] or false end,
@@ -90,12 +91,14 @@ local function drain()
 end
 load('QuestItems.lua')
 local Q = F.QuestItems
+local function Changed() Q.OnEvent(nil, 'QUEST_LOG_UPDATE') end
 Q.Initialize()
 drain()
 check(Q.GetStatus(0, 1) == nil, 'unstarted or future quest is not obsolete')
 completed[1] = true
+Changed()
 local status = Q.GetStatus(0, 1)
-check(status and not status.removed and status.details[1] == 'Completed: Localized quest.', 'completed use names localized quest without quest ID')
+check(status and not status.removed and Q.GetDetails(status)[1] == 'Completed: Localized quest.', 'completed use names localized quest without quest ID')
 Q.RefreshButtons()
 check(marker and marker.shown and marker.atlas == 'common-icon-redx', 'obsolete quest item gets native red cross badge')
 check(marker.width == 20 and marker.height == 20 and marker.point[1] == 'TOPLEFT'
@@ -105,19 +108,24 @@ hooks.SetBagItem(tooltip, 0, 1)
 check(table.concat(tooltip.lines, '\n'):find('All known quests') and table.concat(tooltip.lines, '\n'):find('Completed:'), 'tooltip explains evidence and limited scope')
 check(not table.concat(tooltip.lines, '\n'):find('#1'), 'tooltip does not append quest IDs')
 active[1] = true
+Changed()
 check(Q.GetStatus(0, 1) == nil, 'active use overrides completed history')
 hooks.UpdateQuestItem(button)
 check(not marker.shown, 'active quest clears marker on native refresh')
 active[1] = nil
+Changed()
 info.itemID = 101
 check(Q.GetStatus(0, 1) == nil, 'shared item kept for unfinished followup')
 completed[2] = true
+Changed()
 check(Q.GetStatus(0, 1) ~= nil, 'shared item marked only when all known uses complete')
 info.itemID = 102; completed[3] = true
 check(Q.GetStatus(0, 1) == nil, 'source repeatable flag prevents obsolete marker')
 info.itemID = 100; repeatable[1] = true
+Changed()
 check(Q.GetStatus(0, 1) == nil, 'client repeatability protects item')
 repeatable[1] = nil
+Changed()
 info.itemID = 103
 check(Q.GetStatus(0, 1) == nil, 'ordinary crafting material not treated as obsolete quest item')
 info.itemID = 104
@@ -141,13 +149,15 @@ info.itemID = 100; completed[1] = nil
 Q.OnEvent(nil, 'QUEST_REMOVED', 1)
 drain()
 status = Q.GetStatus(0, 1)
-check(status and status.removed and status.details[1]:find('Removed from log:'), 'explicit removal records removed quest with reason')
+check(status and status.removed and Q.GetDetails(status)[1]:find('Removed from log:'), 'explicit removal records removed quest with reason')
 Q.RefreshButtons()
 check(marker.atlas == 'services-icon-warning' and marker.shown, 'removed use gets native amber warning badge')
 C_Texture.GetAtlasInfo = function() return nil end
+button.ForeverQoLQuestMarkerKind = nil
 Q.UpdateButton(button)
 check(marker.shown and marker.texture:find('UI%-Dialog%-Icon%-AlertNew'), 'missing warning atlas falls back to Blizzard warning artwork')
 completed[1] = true
+Changed()
 Q.UpdateButton(button)
 check(marker.shown and marker.texture:find('UI%-GroupLoot%-Pass%-Up'), 'missing cross atlas falls back to Blizzard pass artwork')
 completed[1] = nil
@@ -178,6 +188,51 @@ check(Q.GetStatus(0, 1) == nil, 'removed use cannot hide another future use')
 local count = #timers
 Q.ScheduleRefresh(); Q.ScheduleRefresh(); Q.ScheduleRefresh()
 check(#timers == count + 1, 'event storms coalesce into one refresh')
+drain()
+-- Count native work after cache invalidation, including deferred detail text.
+local originalCompleted, originalTitle = C_QuestLog.IsQuestFlaggedCompleted, C_QuestLog.GetTitleForQuestID
+local questCalls, titleCalls, logScans, iconWrites = 0, 0, 0, 0
+C_QuestLog.IsQuestFlaggedCompleted = function(id) questCalls = questCalls + 1; return originalCompleted(id) end
+C_QuestLog.GetTitleForQuestID = function(id) titleCalls = titleCalls + 1; return originalTitle(id) end
+C_QuestLog.GetNumQuestLogEntries = function() logScans = logScans + 1; return #log end
+local originalSetAtlas = marker.SetAtlas
+marker.SetAtlas = function(self, atlas) iconWrites = iconWrites + 1; originalSetAtlas(self, atlas) end
+info.itemID, completed[1], native = 100, true, {}
+Q.Invalidate()
+local cachedStatus = Q.GetStatus(0, 1)
+local consistent = true
+for _ = 1, 100 do if Q.GetStatus(0, 1) ~= cachedStatus then consistent = false end end
+check(consistent, 'unchanged item reuses evaluated status')
+check(questCalls == 1 and titleCalls == 0 and cachedStatus.details == nil, 'repeated marker lookups query completion once and build no tooltip text')
+Q.GetDetails(cachedStatus); Q.GetDetails(cachedStatus)
+check(titleCalls == 1, 'tooltip detail names are resolved once per status')
+button.ForeverQoLQuestMarkerKind = nil
+Q.UpdateButton(button)
+Q.UpdateButton(button)
+check(iconWrites == 1, 'unchanged marker avoids repeated atlas writes')
+Q.ScheduleRefresh(); drain()
+check(logScans == 0, 'bag-only refresh does not scan quest log')
+Q.OnEvent(nil, 'QUEST_LOG_UPDATE'); Q.OnEvent(nil, 'QUEST_LOG_UPDATE'); drain()
+check(logScans == 1, 'quest event burst triggers one quest-log scan')
+local lastStatus = Q.GetStatus(0, 1)
+Q.OnEvent(nil, 'BAG_UPDATE_DELAYED'); drain()
+check(Q.GetStatus(0, 1) ~= lastStatus, 'bag change releases prior item cache')
+lastStatus = Q.GetStatus(0, 1)
+Q.OnEvent(nil, 'ITEM_DATA_LOAD_RESULT', 9999, true)
+check(#timers == 0 and Q.GetStatus(0, 1) == lastStatus, 'unrelated item loads do not schedule scans or clear cache')
+Q.OnEvent(nil, 'QUEST_DATA_LOAD_RESULT', 1, true)
+check(Q.GetStatus(0, 1) ~= lastStatus, 'loaded quest data invalidates cached details')
+drain()
+completed[1], active[1] = false, true
+Q.OnEvent(nil, 'QUEST_ACCEPTED', 1)
+check(Q.GetStatus(0, 1) == nil, 'acceptance invalidates cache immediately before deferred refresh')
+drain()
+active[1] = false
+Q.OnEvent(nil, 'QUEST_REMOVED', 1)
+check(Q.GetStatus(0, 1).removed, 'removal invalidates cache immediately')
+drain()
+Q.OnEvent(nil, 'QUEST_TURNED_IN', 1)
+check(not Q.GetStatus(0, 1).removed, 'turn-in invalidates removed status immediately')
 drain()
 check(type(frameEvent) == 'function', 'module registers event dispatcher')
 print(string.format('Passed %d quest-item checks (%d generated items, %d quests, %d links, %d unresolved links kept conservative).', checks, itemCount, questCount, links, missing))

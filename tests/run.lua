@@ -336,6 +336,13 @@ depositButton.scripts.OnClick()
 hooks.OnHide()
 drain()
 check(#uses == 3, 'bank hide hook cancels queue')
+local originalSummary, summaries = F.FilterSummary, 0
+F.FilterSummary = function() summaries = summaries + 1; return originalSummary() end
+open = false
+F.RefreshControls()
+check(summaries == 0, 'closed bank does not rebuild filter display on cursor events')
+open = true
+F.FilterSummary = originalSummary
 
 C_AddOns = {GetAddOnMetadata = function() return '0.1.0' end}
 F.QuestItems = {Initialize = function() end}

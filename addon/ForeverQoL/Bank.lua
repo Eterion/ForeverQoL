@@ -44,7 +44,7 @@ local function Available(bankType)
 end
 
 function F.RefreshControls()
-    if not controls then return end
+    if not controls or not BankFrame:IsShown() then return end
     local enabled = Available(ActiveBank()) and F.FilterCount() > 0
     for _, key in ipairs({ 'deposit', 'withdraw' }) do
         local button = controls[key]

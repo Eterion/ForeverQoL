@@ -71,11 +71,20 @@ else
         itemCount = itemCount + 1
     end
     local file = assert(io.open(output, 'wb'))
-    file:write('-- Generated from QuestieDB ', revision, '; see THIRD_PARTY_NOTICES.md.\nlocal _, F = ...\nF.QuestItemData = {revision=', serialize(revision), ',items={\n')
-    for _, id in ipairs(sorted(items)) do file:write('[', id, ']=', serialize(items[id]), ',\n') end
+    file:write('-- Generated from QuestieDB ', revision, '; see THIRD_PARTY_NOTICES.md.\n-- Items: {class or false, teachesSpell, questID...}; quests: {name, repeatable}.\nlocal _, F = ...\nF.QuestItemData = {revision=', serialize(revision), ',items={\n')
+    for _, id in ipairs(sorted(items)) do
+        local item = items[id]
+        local row = {item.class or false, item.teachesSpell or false}
+        for _, quest in ipairs(item.quests) do row[#row + 1] = quest end
+        local values = {}; for index, value in ipairs(row) do values[index] = serialize(value) end
+        file:write('[', id, ']={', table.concat(values, ','), '},\n')
+    end
     file:write('},quests={\n')
     for _, id in ipairs(sorted(used)) do
-        if quests[id] then file:write('[', id, ']=', serialize(quests[id]), ',\n'); questCount = questCount + 1 end
+        if quests[id] then
+            file:write('[', id, ']={', serialize(quests[id].name), ',', tostring(quests[id].repeatable), '},\n')
+            questCount = questCount + 1
+        end
     end
     file:write('}}\n'); file:close()
     print(string.format('Generated %d item associations and %d quest records.', itemCount, questCount))

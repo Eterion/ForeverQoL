@@ -42,3 +42,9 @@ Forever exposes `C_Bank.AutoDepositItemsIntoBank(bankType)` and `C_Bank.DoesBank
 Offline tests cover filtering, deposit/withdraw routing, bag coverage, account-bank restrictions, cancellation, stale slots, failed moves, counts, and native widget/menu construction. In-game appearance, server permissions for timer-driven transfers, partial-stack behavior, account-bank restrictions and taint/combat interactions require live verification. Check both bank types, full inventory/bank, bank closure mid-transfer, reload persistence and `/fql` before the first release.
 
 Quest-item tests cover generated-data integrity, completion and abandonment reasons, shared/future/repeatable uses, native active-use safeguards, missing data, recycled slots, tooltip output, character separation and event races. Live verification remains necessary for marker positioning, tooltip integration, turn-in/abandon/reaccept refreshes and client quest-history behavior.
+
+## Performance checks
+
+Quest-item data uses compact array records without dropping relationships. Status and quest-state results are shared within an event epoch; bag/quest changes, relevant data loads and character initialization invalidate them. Detailed quest names are formatted only for tooltips. Bag-only refreshes do not rescan the quest log, unrelated item loads do not trigger bag refreshes, and unchanged badges avoid repeated texture updates. Closed banks skip control refresh work.
+
+Run `lua tools/benchmark.lua addon/ForeverQoL` for an offline Lua 5.1 comparison. Against v0.1.0, retained quest-data memory fell from approximately 1,938 to 1,229 KiB (37%). In 20,000 repeated unchanged-item evaluations, internal temporary allocations fell from approximately 9,531 to 1 KiB, and quest-state calls from 60,000 to 3. The benchmark stubs native APIs; these are data/lookup measurements, not in-game frame-rate or total addon-memory measurements.
