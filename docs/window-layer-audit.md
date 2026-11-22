@@ -1,6 +1,6 @@
 # Movable-window layer audit
 
-After installing the development build, use `/reload`. Open Looking for Group's Who tab, drag its title, search, and check the results and search controls. Open another custom-positioned window, then close/reopen Who to check stacking. Reset Who and check its normal placement. Also check Character Skills/Reputation, bags, professions, map controls and collection lists.
+After installing the development build, use `/reload`. Open professions at its default position, check the progress bars, then drag it and check the bars again. Switch professions and return to the overview; close/reopen and reset the window. Open Looking for Group's Who tab, drag its title, search, and check the results and search controls. Also check Character Skills/Reputation, bags, map controls and collection lists. Native strata retain priority when windows overlap.
 
 ## Source findings
 
@@ -17,14 +17,16 @@ Inspected the public [Forever UI source](https://github.com/Gethe/wow-ui-source/
 | Friends and calendar | HIGH broadcast and calendar detail/scrolling controls. |
 | Spellbook/talents, auctions and trainer | HIGH help/talent overlays, auction favorites and trainer controls. |
 
-The common failure was promoting a window root to HIGH while its explicit HIGH descendants retained low frame levels. Previously separate layers became peers, allowing background art to cover controls. Fixing only profession bars missed other examples of the same pattern.
+Promoting a window root to HIGH collapses the distinction between its background and explicit HIGH controls. The owner confirmed that profession bars worked at the default position but disappeared on dragging in dev.14. The shared descendant-layer remapping was not reliable in game, despite passing mocks, and has been removed along with forced root-strata changes.
 
-## Shared handling
+## Native layering and BlizzMove comparison
 
-For a custom-positioned window, capture its descendant drawing order by native strata and frame level, then represent that order with compact frame levels in the shared HIGH window layer. Preserve equal native levels. Refresh discovery on raises so pooled rows are included; stop managing widgets reparented outside the window. Restore captured strata and levels on reset. Normal, unmoved windows are untouched. Dialog/menu/tooltip layers and forbidden subtrees are excluded.
+Reviewed the current [BlizzMove movement code](https://github.com/Kiatra/BlizzMove/blob/master/BlizzMove.lua) and [profession frame registration](https://github.com/Kiatra/BlizzMove/blob/master/Frames.lua) on 2026-11-22. Normal movement does not rewrite window/descendant strata or levels. Its debug capture overlay and its own move handles set their own layers; those are separate from moving the original window. Profession registration contains no rank-bar layering workaround. This is source evidence, not proof that BlizzMove never has rendering bugs in any client.
 
-There are no per-frame update handlers or whole-UI scans for stacking: a raise traverses only that window's descendants, and sorting is repeated only when membership changes. Native drawing metadata is retained only for custom-positioned windows until reset.
+ForeverQoL now leaves the native drawing hierarchy in place too. Reopening or dragging calls native `Raise()` on the window. There is no descendant scan, cache, sort or rewrite for stacking. The addon's transparent title handle still sets its own level. Position persistence, floating panel layout and native reset are unchanged.
+
+Native `Raise()` operates within a strata, so a higher-strata window can remain above a lower-strata window opened later. Strict last-opened ordering across different native strata is not supported by this implementation. That earlier requirement remains a limitation rather than being simulated by rewriting child layers.
 
 ## Verification boundary
 
-Automated cases cover Who's high-level title art, search controls and list inset; late pooled rows; reparented widgets; forbidden widgets; untouched dialogs/tooltips; primary/secondary/crafting profession bars; and mixed LOW/MEDIUM/HIGH ordering representative of the other source findings. Tests check repeated raises, restoration and reopening order. They use UI mocks and do not establish pixel rendering, hit testing, protected-frame behavior or third-party-addon compatibility in the game. Those still require the live checks above.
+Automated cases cover default-to-dragged profession bars, rank text/dropdowns, reopening, native page-level changes, crafting and standalone bars, Who search/list layers, late pooled rows, forbidden widgets, dialogs/tooltips, and mixed LOW/MEDIUM/HIGH ordering. The frame mock propagates parent frame-level changes to children in the same strata. Assertions check native drawing priority and that the mover never writes native strata. Tests do not establish pixel rendering, hit testing, protected-frame behavior or third-party-addon compatibility in the game. Those still require the live checks above.

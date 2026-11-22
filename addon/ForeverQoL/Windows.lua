@@ -83,95 +83,11 @@ local function Default(record)
     frame:SetUserPlaced(false)
 end
 
-local strataOrder = {BACKGROUND=1, LOW=2, MEDIUM=3, HIGH=4}
-
-local function CaptureLayers(record)
-    local layers = record.layers
-    if not layers then
-        layers = {frames={}, order={}, byFrame={}}
-        record.layers = layers
-    end
-    local changed
-    layers.generation = (layers.generation or 0) + 1
-    local function Visit(frame)
-        if frame.IsForbidden and frame:IsForbidden() then return end
-        local strata = frame:GetFrameStrata()
-        -- Dialogs, menus and tooltips keep their native overlay layers.
-        if not strataOrder[strata] then return end
-        local entry = layers.byFrame[frame]
-        if not entry then
-            local level = frame:GetFrameLevel()
-            local parent = frame:GetParent()
-            local owner = parent and layers.byFrame[parent]
-            -- Newly allocated scroll rows inherit their already-raised
-            -- parent's layer. Record their native relative level for reset.
-            if layers.applied and owner and strata == parent:GetFrameStrata() and level >= parent:GetFrameLevel() then
-                strata, level = owner.strata, owner.level + level - parent:GetFrameLevel()
-            end
-            entry = {frame=frame, strata=strata, level=level}
-            layers.byFrame[frame] = entry
-            layers.frames[#layers.frames + 1] = entry -- Parent before children.
-            changed = true
-        end
-        entry.generation = layers.generation
-        if frame.GetChildren then
-            for _, child in ipairs({frame:GetChildren()}) do Visit(child) end
-        end
-    end
-    Visit(record.frame)
-    for index = #layers.frames, 1, -1 do
-        local entry = layers.frames[index]
-        if entry.generation ~= layers.generation then
-            layers.byFrame[entry.frame] = nil
-            table.remove(layers.frames, index)
-            changed = true
-        end
-    end
-    if changed then
-        layers.order = {}
-        for _, entry in ipairs(layers.frames) do layers.order[#layers.order + 1] = entry end
-        table.sort(layers.order, function(a, b)
-            if a.strata ~= b.strata then return strataOrder[a.strata] < strataOrder[b.strata] end
-            return a.level < b.level
-        end)
-        local rank, previous = 0
-        for _, entry in ipairs(layers.order) do
-            if not previous or previous.strata ~= entry.strata or previous.level ~= entry.level then rank = rank + 1 end
-            entry.rank, previous = rank, entry
-        end
-    end
-    return layers
-end
-
+-- Keep Blizzard's drawing hierarchy intact, as BlizzMove does. Rewriting
+-- descendant strata/levels breaks native lists, masks and progress bars.
 local function RaiseWindow(record)
-    local frame = record.frame
-    if not strataOrder[record.nativeStrata] then frame:Raise(); return end
-    local layers = CaptureLayers(record)
-    -- Collapse the native (strata, level) drawing order into one window layer.
-    -- Raising only the root turns explicit HIGH children into low-level peers
-    -- of their own background. This affects Who search, lists, bars and more.
-    frame:SetFrameStrata('HIGH')
-    frame:Raise()
-    local base = frame:GetFrameLevel()
-    for _, entry in ipairs(layers.frames) do
-        if Allowed(entry.frame) then
-            entry.frame:SetFrameStrata('HIGH')
-            entry.frame:SetFrameLevel(base + entry.rank)
-        end
-    end
-    layers.applied = true
+    record.frame:Raise()
 end
-
-local function RestoreLayers(record)
-    for _, entry in ipairs(record.layers and record.layers.frames or {}) do
-        if Allowed(entry.frame) then
-            entry.frame:SetFrameStrata(entry.strata)
-            entry.frame:SetFrameLevel(entry.level)
-        end
-    end
-    record.layers = nil
-end
-
 local function RestoreNative(record)
     if record.detached then
         record.frame:SetAttributeNoHandler('UIPanelLayout-area', record.nativeArea or record.panel.area)
@@ -183,8 +99,6 @@ local function RestoreNative(record)
         end
         record.escapeAdded = nil
     end
-    record.frame:SetFrameStrata(record.nativeStrata)
-    RestoreLayers(record)
 end
 
 function W.Front(record)
@@ -289,7 +203,6 @@ function W.Attach(frame, explicit)
     end
     if InCombatLockdown() then return end -- Retry registration after combat.
     local record = {name = name, frame = frame, defaults = CapturePoints(frame), panel = panel,
-        nativeStrata = frame:GetFrameStrata(),
         bag = name:match('^ContainerFrame') ~= nil}
     W.records[name] = record
     frame:SetMovable(true)

@@ -24,9 +24,16 @@ local function frame(name, parent, width, height)
     function f:GetLeft() return self.left end
     function f:GetTop() return self.top end
     function f:GetFrameLevel() return self.level end
-    function f:SetFrameLevel(level) mutate(self); self.level=level end
+    function f:SetFrameLevel(level)
+        mutate(self)
+        local delta=level-self.level; self.level=level
+        -- The engine moves children in the same strata along with a parent.
+        for _,child in ipairs({self:GetChildren()}) do
+            if child.strata==self.strata then child:SetFrameLevel(child.level+delta) end
+        end
+    end
     function f:GetFrameStrata() return self.strata end
-    function f:SetFrameStrata(value) mutate(self); self.strata=value end
+    function f:SetFrameStrata(value) mutate(self); self.strata=value; self.strataWrites=(self.strataWrites or 0)+1 end
     function f:SetHeight(value) self.height=value end
     function f:SetWidth(value) self.width=value; if self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self) end end
     function f:GetNumPoints() return #self.points end
@@ -51,9 +58,9 @@ local function frame(name, parent, width, height)
     function f:StopMovingOrSizing() mutate(self); self.dragging=false; self.stops=(self.stops or 0)+1 end
     function f:Raise()
         mutate(self); self.raised=(self.raised or 0)+1; raiseOrder=raiseOrder+1; self.order=raiseOrder
-        for _,other in ipairs(allFrames) do
-            if other.strata==self.strata then self.level=math.max(self.level,other.level+1) end
-        end
+        local level=self.level
+        for _,other in ipairs(allFrames) do if other.strata==self.strata then level=math.max(level,other.level+1) end end
+        self:SetFrameLevel(level)
     end
     function f:GetAttribute(key) return self.attrs[key] end
     function f:SetAttributeNoHandler(key, value) mutate(self); self.attrs[key]=value end
@@ -192,7 +199,7 @@ check(near(saved.x,600/1920) and near(saved.y,800/1080), 'saved position contain
 check(not CharacterFrame.userPlaced and CharacterFrame.dontSave, 'addon owns persistence without polluting native layout cache')
 HideUIPanel(CharacterFrame); drain(); ShowUIPanel(CharacterFrame)
 check(near(CharacterFrame.left,600) and near(CharacterFrame.top,800), 'position restored on reopen')
-check(character.detached and CharacterFrame.strata=='HIGH', 'custom window floats in common window layer')
+check(character.detached and CharacterFrame.strata=='MEDIUM', 'custom window floats while retaining its native strata')
 CharacterFrame:ClearAllPoints(); CharacterFrame:SetPoint('CENTER',UIParent,'CENTER',0,0)
 check(CharacterFrame.points[1][1]=='TOPLEFT' and near(CharacterFrame.left,600), 'native reposition cannot snap saved window back')
 character.handle.scripts.OnClick(character.handle,'RightButton')
@@ -344,8 +351,8 @@ ForeverQoLDB.windowPositions.WorldMapFrame={x=.2,y=.8}
 W.Apply(map); ShowUIPanel(WorldMapFrame)
 check(WorldMapFrame.order>CharacterFrame.order and WorldMapFrame.shown and CharacterFrame.shown, 'opening custom map raises it above overlapping custom character sheet')
 HideUIPanel(CharacterFrame); ShowUIPanel(CharacterFrame)
-check(CharacterFrame.order>WorldMapFrame.order and CharacterFrame.strata==WorldMapFrame.strata
-    and near(CharacterFrame.left,420), 'C-M-C-C sequence reopens character sheet above map at same saved position')
+check(CharacterFrame.order>WorldMapFrame.order and CharacterFrame.strata=='MEDIUM' and WorldMapFrame.strata=='HIGH'
+    and near(CharacterFrame.left,420), 'reopening raises character sheet at saved position without rewriting native map strata priority')
 HideUIPanel(WorldMapFrame); ShowUIPanel(WorldMapFrame)
 check(WorldMapFrame.order>CharacterFrame.order, 'latest reopened custom window comes to front in either order')
 ShowUIPanel(BankFrame)
@@ -355,15 +362,18 @@ check(not BankFrame.shown and ForeverQoLDB.windowPositions.BankFrame==nil, 'rese
 ShowUIPanel(BankFrame)
 check(slots.left==BankFrame and BankFrame.attrs['UIPanelLayout-area']=='left', 'next NPC interaction uses native default panel management')
 closeWindows()
--- Match Forever's book: page level 100, cards on the page's strata, and
--- explicitly HIGH rank bars with low levels. Raise does not move those bars.
+-- Compare actual native strata first; HIGH widgets need not have larger
+-- frame levels than MEDIUM backgrounds to render above them.
+local nativeStrata={BACKGROUND=1,LOW=2,MEDIUM=3,HIGH=4,DIALOG=5,TOOLTIP=6}
+local function above(a,b)
+    if a.strata~=b.strata then return nativeStrata[a.strata]>nativeStrata[b.strata] end
+    return a.level>b.level
+end
 ProfessionsFrame=frame('ProfessionsFrame',UIParent)
 UIPanelWindows.ProfessionsFrame={area='left'}
 local page=frame(nil,ProfessionsFrame); page.level=100
 local content=frame(nil,page); content.level=101
 ProfessionsFrame.BookPage=page; page.ProfessionsContentFrame=content
-local crafting=frame(nil,ProfessionsFrame); crafting.level=100; ProfessionsFrame.CraftingPage=crafting
-crafting.RankBar=frame(nil,crafting); crafting.RankBar.strata='HIGH'; crafting.RankBar.level=1
 local cards={}
 for _,key in ipairs({'PrimaryProfession1','PrimaryProfession2','SecondaryProfession1','SecondaryProfession2','SecondaryProfession3'}) do
     local card=frame(nil,content); card.level=102; content[key]=card
@@ -372,47 +382,34 @@ for _,key in ipairs({'PrimaryProfession1','PrimaryProfession2','SecondaryProfess
     bar.ExpansionDropdownButton=frame(nil,bar); bar.ExpansionDropdownButton.strata='HIGH'; bar.ExpansionDropdownButton.level=2
     cards[#cards+1]=card
 end
-local nativeRaise=ProfessionsFrame.Raise
-function ProfessionsFrame:Raise()
-    nativeRaise(self)
-    self.level=self.level+100; page.level=page.level+100; content.level=content.level+100; crafting.level=crafting.level+100
-    for _,card in ipairs(cards) do card.level=card.level+100 end
-end
+local crafting=frame(nil,ProfessionsFrame); crafting.level=100; ProfessionsFrame.CraftingPage=crafting
+crafting.RankBar=frame(nil,crafting); crafting.RankBar.strata='HIGH'; crafting.RankBar.level=1
 W.Scan(); local professions=W.records.ProfessionsFrame
 ShowUIPanel(ProfessionsFrame)
-check(cards[1].StatusBar.level==1 and professions.layers==nil, 'unmoved professions preserves native bar layers')
+check(above(cards[1].StatusBar,cards[1]), 'default profession bar renders above its card using native strata')
 W.Start(professions); W.Stop(professions)
 for _,card in ipairs(cards) do
-    check(card.StatusBar.level>card.level and card.StatusBar.Rank.level>card.StatusBar.level
-        and card.StatusBar.ExpansionDropdownButton.level>card.StatusBar.level, 'primary and secondary progress bars, rank text and dropdown remain above raised profession cards')
+    local bar=card.StatusBar
+    check(ProfessionsFrame.strata=='MEDIUM' and above(bar,card) and bar.level==1 and bar.Rank.level==5
+        and bar.ExpansionDropdownButton.level==2 and not bar.strataWrites,
+        'drag keeps each primary/secondary profession bar, rank and dropdown on untouched native layers')
 end
-check(crafting.RankBar.level>crafting.level, 'crafting page rank bar remains above its raised page')
+check(above(crafting.RankBar,crafting) and crafting.RankBar.level==1, 'drag preserves the crafting page rank bar')
 HideUIPanel(ProfessionsFrame); drain(); ShowUIPanel(ProfessionsFrame)
-check(cards[1].StatusBar.level==cards[1].level+1, 'reopening raises professions without hiding its explicit HIGH bars')
 professions.handle.scripts.OnMouseDown()
-check(cards[1].StatusBar.level==cards[1].level+1, 'clicking title preserves progress bar visibility after another raise')
-local savedProfessionPosition=ForeverQoLDB.windowPositions.ProfessionsFrame
-ShowUIPanel(WorldMapFrame)
-W.Front(map); W.Front(professions)
-check(ProfessionsFrame.order>WorldMapFrame.order and ForeverQoLDB.windowPositions.ProfessionsFrame==savedProfessionPosition,
-    'professions still comes forward over map without changing saved position')
+check(above(cards[1].StatusBar,cards[1]) and not ProfessionsFrame.strataWrites, 'reopen and title click retain native profession strata')
+page:SetFrameLevel(100) -- Blizzard can change page levels while switching tabs.
+W.Front(professions)
+check(above(cards[1].StatusBar,cards[1]) and cards[1].StatusBar.level==1, 'native tab-level changes do not require mover layer repair')
 W.Reset(professions)
-check(professions.layers==nil and ProfessionsFrame.strata=='MEDIUM'
-    and cards[1].StatusBar.level-cards[1].level==-101
-    and cards[1].StatusBar.Rank.level-cards[1].StatusBar.level==4,
-    'reset restores original relative profession bar and rank layers')
-check(crafting.RankBar.level-crafting.level==-99, 'reset restores original crafting rank bar layer')
+check(not ProfessionsFrame.strataWrites and not crafting.RankBar.strataWrites and cards[1].StatusBar.level==1,
+    'reset does not rewrite native profession drawing metadata')
 ProfessionsBookFrame=frame('ProfessionsBookFrame',UIParent)
 local standaloneContent=frame(nil,ProfessionsBookFrame); standaloneContent.level=100
-ProfessionsBookFrame.ProfessionsContentFrame=standaloneContent
-local standaloneCard=frame(nil,standaloneContent); standaloneCard.level=101
-standaloneContent.PrimaryProfession1=standaloneCard
-local standaloneBar=frame(nil,standaloneCard); standaloneBar.level=1; standaloneBar.strata='HIGH'
-standaloneCard.StatusBar=standaloneBar
-W.Scan()
-local standaloneBook=W.records.ProfessionsBookFrame
+local standaloneBar=frame(nil,standaloneContent); standaloneBar.level=1; standaloneBar.strata='HIGH'
+W.Scan(); local standaloneBook=W.records.ProfessionsBookFrame
 W.Start(standaloneBook); W.Stop(standaloneBook)
-check(standaloneBar.level>standaloneContent.level, 'standalone profession book also keeps bars above cards')
+check(above(standaloneBar,standaloneContent) and standaloneBar.level==1, 'standalone profession book retains native bar layering')
 closeWindows()
 LFGParentFrame=frame('LFGParentFrame',UIParent)
 UIPanelWindows.LFGParentFrame={area='left'}
@@ -427,29 +424,22 @@ local whoDialog=frame(nil,who); whoDialog.strata='DIALOG'; whoDialog.level=4
 local forbidden=frame(nil,who); forbidden.forbidden=true
 function forbidden:GetFrameStrata() error('must not inspect forbidden frame') end
 W.Scan(true); local lfg=W.records.LFGParentFrame
-check(lfg and not W.records.LFGWhoListFrame, 'Who tab moves with its LFG owner rather than becoming a separate window')
-ShowUIPanel(LFGParentFrame)
-W.Start(lfg); W.Stop(lfg)
-check(whoEdit.level>whoInset.level and whoSearch.level>whoInset.level
-    and whoList.level>whoInset.level, 'Who search, action and list stay above native background after dragging')
+check(lfg and not W.records.LFGWhoListFrame, 'Who tab remains part of the LFG owner')
+ShowUIPanel(LFGParentFrame); W.Start(lfg); W.Stop(lfg)
+check(above(whoEdit,whoInset) and above(whoSearch,whoInset) and above(whoList,whoInset),
+    'Who search and list stay above their background after dragging')
 check(whoTooltip.strata=='TOOLTIP' and whoTooltip.level==3 and whoDialog.strata=='DIALOG' and whoDialog.level==4,
-    'tooltips and modal dialogs retain their native layers')
-local lateRow=frame(nil,whoList); lateRow.strata=whoList.strata; lateRow.level=whoList.level+1
+    'tooltips and dialogs retain native overlay layers')
+local lateRow=frame(nil,whoList); lateRow.level=whoList.level+1
 W.Front(lfg)
-check(lateRow.level>whoList.level and whoEdit.level>lateRow.level, 'late pooled Who rows stay above list background and below search overlay')
-lateRow.parent=UIParent
-W.Front(lfg)
-local removedLevel=lateRow.level
-W.Front(lfg)
-check(not lfg.layers.byFrame[lateRow] and lateRow.level==removedLevel, 'reparented widgets leave the layer cache and are no longer changed')
+check(above(lateRow,whoList) and above(whoEdit,lateRow), 'late Who rows inherit native list layers without a mover cache')
 HideUIPanel(LFGParentFrame); drain(); ShowUIPanel(LFGParentFrame)
-check(whoEdit.level>who.TitleContainer.level and whoSearch.level>whoInset.level,
-    'reopened Who controls retain the full native strata ordering above high-level title art')
+check(above(whoEdit,who.TitleContainer) and whoEdit.level==1 and not whoEdit.strataWrites,
+    'reopened Who search retains its native priority above title art')
 W.Reset(lfg)
-check(whoEdit.strata=='HIGH' and whoEdit.level==1 and whoInset.strata=='MEDIUM' and whoInset.level==500
-    and whoList.level==501 and who.TitleContainer.level==510, 'Who reset restores original strata and levels exactly')
+check(not whoEdit.strataWrites and not whoInset.strataWrites and whoEdit.level==1,
+    'Who reset leaves native drawing layers intact')
 do
-    local label='Other mixed-layer windows'
     local owner=frame('LayerAudit',UIParent)
     local art=frame(nil,owner); art.level=510
     local low=frame(nil,owner); low.strata='LOW'; low.level=900
@@ -458,20 +448,14 @@ do
     local peer=frame(nil,overlay); peer.strata='HIGH'; peer.level=5
     W.Attach(owner,true); local record=W.records[owner.name]
     owner:Show(); W.Start(record); W.Stop(record)
-    check(low.level<owner.level and overlay.level>art.level and detail.level>overlay.level,
-        label..': mixed strata retain native drawing order')
-    check(peer.level==detail.level, 'equal native levels remain equal to preserve draw-layer and sibling ordering')
-    local firstSpan=detail.level-low.level
     W.Front(record); W.Front(record)
-    check(detail.level-low.level==firstSpan, label..': repeated raises do not inflate internal level spacing')
+    check(above(owner,low) and above(overlay,art) and above(detail,overlay) and peer.level==detail.level,
+        'mixed-layer controls and equal native levels survive repeated raises')
     W.Reset(record)
     check(low.strata=='LOW' and low.level==900 and overlay.strata=='HIGH' and overlay.level==1
-        and detail.level==5 and art.level==510, label..': default restores every original layer')
+        and detail.level==5 and not overlay.strataWrites, 'other windows retain original low/high drawing metadata')
     owner:Hide()
 end
-ShowUIPanel(WorldMapFrame); ShowUIPanel(LFGParentFrame)
-W.Start(lfg); W.Stop(lfg)
-check(LFGParentFrame.level>WorldMapFrame.level, 'last raised custom window is above another custom window')
 W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
 local persisted=ForeverQoLDB.windowPositions.CharacterFrame
 -- Simulate fresh UI objects and module state using the existing saved variables.
