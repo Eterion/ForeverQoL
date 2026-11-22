@@ -13,7 +13,7 @@ local names = {
     'QuestLogFrame', 'QuestFrame', 'GossipFrame', 'MerchantFrame', 'BankFrame',
     'MailFrame', 'OpenMailFrame', 'TradeFrame', 'AuctionHouseFrame', 'AuctionFrame',
     'ClassTrainerFrame', 'TrainerFrame', 'TradeSkillFrame', 'CraftFrame', 'ProfessionsFrame', 'ProfessionsBookFrame',
-    'ProfessionsCustomerOrdersFrame', 'FriendsFrame', 'SocialUIFrame', 'GuildFrame',
+    'ProfessionsCustomerOrdersFrame', 'LFGParentFrame', 'FriendsFrame', 'SocialUIFrame', 'GuildFrame',
     'CommunitiesFrame', 'InspectFrame', 'DressUpFrame', 'CollectionsJournal', 'EncounterJournal',
     'AchievementFrame', 'ItemTextFrame', 'ItemSocketingFrame', 'ItemUpgradeFrame',
     'CalendarFrame', 'SettingsPanel', 'GameMenuFrame', 'AddonList', 'HelpFrame',
@@ -83,50 +83,93 @@ local function Default(record)
     frame:SetUserPlaced(false)
 end
 
-local professionCards = {'PrimaryProfession1', 'PrimaryProfession2',
-    'SecondaryProfession1', 'SecondaryProfession2', 'SecondaryProfession3'}
+local strataOrder = {BACKGROUND=1, LOW=2, MEDIUM=3, HIGH=4}
 
-local function ProfessionLayers(record, mode)
-    if mode == 'restore' then
-        for _, layer in ipairs(record.professionLayers or {}) do
-            layer.frame:SetFrameLevel(math.max(0, layer.frame:GetParent():GetFrameLevel() + layer.offset))
-        end
-        record.professionLayers = nil
-        return
+local function CaptureLayers(record)
+    local layers = record.layers
+    if not layers then
+        layers = {frames={}, order={}, byFrame={}}
+        record.layers = layers
     end
-    if record.name ~= 'ProfessionsFrame' and record.name ~= 'ProfessionsBookFrame' then return end
+    local changed
+    layers.generation = (layers.generation or 0) + 1
+    local function Visit(frame)
+        if frame.IsForbidden and frame:IsForbidden() then return end
+        local strata = frame:GetFrameStrata()
+        -- Dialogs, menus and tooltips keep their native overlay layers.
+        if not strataOrder[strata] then return end
+        local entry = layers.byFrame[frame]
+        if not entry then
+            local level = frame:GetFrameLevel()
+            local parent = frame:GetParent()
+            local owner = parent and layers.byFrame[parent]
+            -- Newly allocated scroll rows inherit their already-raised
+            -- parent's layer. Record their native relative level for reset.
+            if layers.applied and owner and strata == parent:GetFrameStrata() and level >= parent:GetFrameLevel() then
+                strata, level = owner.strata, owner.level + level - parent:GetFrameLevel()
+            end
+            entry = {frame=frame, strata=strata, level=level}
+            layers.byFrame[frame] = entry
+            layers.frames[#layers.frames + 1] = entry -- Parent before children.
+            changed = true
+        end
+        entry.generation = layers.generation
+        if frame.GetChildren then
+            for _, child in ipairs({frame:GetChildren()}) do Visit(child) end
+        end
+    end
+    Visit(record.frame)
+    for index = #layers.frames, 1, -1 do
+        local entry = layers.frames[index]
+        if entry.generation ~= layers.generation then
+            layers.byFrame[entry.frame] = nil
+            table.remove(layers.frames, index)
+            changed = true
+        end
+    end
+    if changed then
+        layers.order = {}
+        for _, entry in ipairs(layers.frames) do layers.order[#layers.order + 1] = entry end
+        table.sort(layers.order, function(a, b)
+            if a.strata ~= b.strata then return strataOrder[a.strata] < strataOrder[b.strata] end
+            return a.level < b.level
+        end)
+        local rank, previous = 0
+        for _, entry in ipairs(layers.order) do
+            if not previous or previous.strata ~= entry.strata or previous.level ~= entry.level then rank = rank + 1 end
+            entry.rank, previous = rank, entry
+        end
+    end
+    return layers
+end
+
+local function RaiseWindow(record)
     local frame = record.frame
-    local content = frame.ProfessionsContentFrame or (frame.BookPage and frame.BookPage.ProfessionsContentFrame)
-    record.professionLayers = record.professionLayers or {}
-    local function AboveParent(widget)
-        if not widget or not Allowed(widget) then return end
-        local parent = widget:GetParent()
-        local found
-        for _, layer in ipairs(record.professionLayers) do if layer.frame == widget then found = true; break end end
-        if not found then
-            record.professionLayers[#record.professionLayers + 1] = {
-                frame = widget, offset = widget:GetFrameLevel() - parent:GetFrameLevel(),
-            }
-        end
-        -- Forever's book bars use an explicit HIGH strata with low frame
-        -- levels. Raising the whole window into HIGH otherwise hides them
-        -- beneath the book cards (whose page starts at frame level 100).
-        if mode ~= 'capture' and widget:GetFrameLevel() <= parent:GetFrameLevel() then
-            widget:SetFrameLevel(parent:GetFrameLevel() + 1)
+    if not strataOrder[record.nativeStrata] then frame:Raise(); return end
+    local layers = CaptureLayers(record)
+    -- Collapse the native (strata, level) drawing order into one window layer.
+    -- Raising only the root turns explicit HIGH children into low-level peers
+    -- of their own background. This affects Who search, lists, bars and more.
+    frame:SetFrameStrata('HIGH')
+    frame:Raise()
+    local base = frame:GetFrameLevel()
+    for _, entry in ipairs(layers.frames) do
+        if Allowed(entry.frame) then
+            entry.frame:SetFrameStrata('HIGH')
+            entry.frame:SetFrameLevel(base + entry.rank)
         end
     end
-    local function Bar(bar)
-        if bar then
-            AboveParent(bar)
-            AboveParent(bar.Rank)
-            AboveParent(bar.ExpansionDropdownButton)
+    layers.applied = true
+end
+
+local function RestoreLayers(record)
+    for _, entry in ipairs(record.layers and record.layers.frames or {}) do
+        if Allowed(entry.frame) then
+            entry.frame:SetFrameStrata(entry.strata)
+            entry.frame:SetFrameLevel(entry.level)
         end
     end
-    for _, key in ipairs(professionCards) do
-        local card = content and content[key]
-        Bar(card and card.StatusBar)
-    end
-    Bar(frame.CraftingPage and frame.CraftingPage.RankBar)
+    record.layers = nil
 end
 
 local function RestoreNative(record)
@@ -141,17 +184,12 @@ local function RestoreNative(record)
         record.escapeAdded = nil
     end
     record.frame:SetFrameStrata(record.nativeStrata)
-    ProfessionLayers(record, 'restore')
+    RestoreLayers(record)
 end
 
 function W.Front(record)
     if not positions[record.name] or not Allowed(record.frame) or not record.frame:IsShown() then return end
-    -- Raise alone cannot cross strata (the map and character sheet differ).
-    -- Keep custom windows together, then let the engine raise the whole family.
-    ProfessionLayers(record, 'capture')
-    record.frame:SetFrameStrata('HIGH')
-    record.frame:Raise()
-    ProfessionLayers(record)
+    RaiseWindow(record)
 end
 
 function W.Apply(record)
@@ -199,10 +237,7 @@ function W.Start(record)
     if activeDrag then W.Stop(activeDrag) end
     local frame = record.frame
     record.moving, activeDrag = true, record
-    ProfessionLayers(record, 'capture')
-    frame:SetFrameStrata('HIGH')
-    frame:Raise()
-    ProfessionLayers(record)
+    RaiseWindow(record)
     frame:StartMoving()
 end
 
@@ -279,7 +314,9 @@ function W.Attach(frame, explicit)
     handle:SetScript('OnDragStart', function() W.Start(record) end)
     handle:SetScript('OnDragStop', function() W.Stop(record) end)
     handle:SetScript('OnMouseDown', function()
-        if Allowed(frame) then frame:Raise(); if positions[name] then ProfessionLayers(record) end end
+        if Allowed(frame) then
+            if positions[name] then RaiseWindow(record) else frame:Raise() end
+        end
     end)
     handle:SetScript('OnClick', function(self, button) if button == 'RightButton' then Menu(record, self) end end)
     frame:HookScript('OnShow', function()

@@ -33,7 +33,7 @@ Supported Blizzard panels float independently instead of being pushed aside or c
 
 Saved coordinates account for window scale and screen dimensions and are clamped back onto the screen after resolution changes. Maximize/restore and combat restrictions remain owned by the game: restore a maximized window before moving it, and move/reset windows outside combat. A panel already managed by Blizzard when first discovered is detached after its native close, so its current interaction is not interrupted; reopen it for independent overlap. NPC/server interactions can still close their own windows. Fullscreen scenes, action bars, unit frames, tooltips, forbidden frames and unnamed widgets are not treated as movable windows.
 
-The implementation is independent, using [BlizzMove](https://github.com/Kiatra/BlizzMove) as behaviour inspiration and the Forever client's panel-manager APIs for floating panels.
+The implementation is independent, using [BlizzMove](https://github.com/Kiatra/BlizzMove) as behaviour inspiration and the Forever client's panel-manager APIs for floating panels. Custom windows preserve the drawing order of their internal Blizzard layers when brought forward; see the [window layer audit](docs/window-layer-audit.md) for findings and live checks.
 
 ## Development
 
@@ -53,7 +53,7 @@ Offline tests cover filtering, deposit/withdraw routing, bag coverage, account-b
 
 Quest-item tests cover generated-data integrity, completion and abandonment reasons, shared/future/repeatable uses, native active-use safeguards, missing data, recycled slots, tooltip output, character separation and event races. Live verification remains necessary for marker positioning, tooltip integration, turn-in/abandon/reaccept refreshes and client quest-history behavior.
 
-Movable-window tests cover normal left dragging, persistent positions on fresh UI objects, title reset menus, compact/expanded spellbook metadata, native panel placement and eviction after reset, reopening order across frame strata, professions progress-bar layering, overlapping managed panels, original defaults, scale/resolution changes, clamping, invalid saved data, late window discovery, bag layout, Escape registration and combat-deferred operations. Live testing remains necessary for each client's protected-panel behaviour, unusual custom title bars, NPC interactions and windows controlled by other movers.
+Movable-window tests cover normal left dragging, persistent positions on fresh UI objects, title reset menus, compact/expanded spellbook metadata, native panel placement and eviction after reset, reopening order across frame strata, Who and professions layering, mixed-layer controls in other window families, late pooled rows, reparented/forbidden widgets, overlapping managed panels, original defaults, scale/resolution changes, clamping, invalid saved data, late window discovery, bag layout, Escape registration and combat-deferred operations. Live testing remains necessary for each client's protected-panel behaviour, unusual custom title bars, NPC interactions and windows controlled by other movers.
 
 ## Performance checks
 

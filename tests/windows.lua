@@ -12,6 +12,11 @@ local function frame(name, parent, width, height)
     local function mutate(self) assert(not combat or not self.protected, 'protected mutation during combat') end
     function f:GetName() return self.name end
     function f:GetParent() return self.parent end
+    function f:GetChildren()
+        local children={}
+        for _,child in ipairs(allFrames) do if child.parent==self then children[#children+1]=child end end
+        return unpack(children)
+    end
     function f:GetWidth() return self.width end
     function f:GetHeight() return self.height end
     function f:GetScale() return self.scale end
@@ -19,7 +24,7 @@ local function frame(name, parent, width, height)
     function f:GetLeft() return self.left end
     function f:GetTop() return self.top end
     function f:GetFrameLevel() return self.level end
-    function f:SetFrameLevel(level) self.level=level end
+    function f:SetFrameLevel(level) mutate(self); self.level=level end
     function f:GetFrameStrata() return self.strata end
     function f:SetFrameStrata(value) mutate(self); self.strata=value end
     function f:SetHeight(value) self.height=value end
@@ -44,7 +49,12 @@ local function frame(name, parent, width, height)
     function f:SetDontSavePosition(value) mutate(self); self.dontSave=value end
     function f:StartMoving() mutate(self); self.dragging=true end
     function f:StopMovingOrSizing() mutate(self); self.dragging=false; self.stops=(self.stops or 0)+1 end
-    function f:Raise() mutate(self); self.raised=(self.raised or 0)+1; raiseOrder=raiseOrder+1; self.order=raiseOrder end
+    function f:Raise()
+        mutate(self); self.raised=(self.raised or 0)+1; raiseOrder=raiseOrder+1; self.order=raiseOrder
+        for _,other in ipairs(allFrames) do
+            if other.strata==self.strata then self.level=math.max(self.level,other.level+1) end
+        end
+    end
     function f:GetAttribute(key) return self.attrs[key] end
     function f:SetAttributeNoHandler(key, value) mutate(self); self.attrs[key]=value end
     function f:RegisterForDrag(...) self.dragButtons={...} end
@@ -370,7 +380,7 @@ function ProfessionsFrame:Raise()
 end
 W.Scan(); local professions=W.records.ProfessionsFrame
 ShowUIPanel(ProfessionsFrame)
-check(cards[1].StatusBar.level==1 and professions.professionLayers==nil, 'unmoved professions preserves native bar layers')
+check(cards[1].StatusBar.level==1 and professions.layers==nil, 'unmoved professions preserves native bar layers')
 W.Start(professions); W.Stop(professions)
 for _,card in ipairs(cards) do
     check(card.StatusBar.level>card.level and card.StatusBar.Rank.level>card.StatusBar.level
@@ -387,17 +397,81 @@ W.Front(map); W.Front(professions)
 check(ProfessionsFrame.order>WorldMapFrame.order and ForeverQoLDB.windowPositions.ProfessionsFrame==savedProfessionPosition,
     'professions still comes forward over map without changing saved position')
 W.Reset(professions)
-check(professions.professionLayers==nil and ProfessionsFrame.strata=='MEDIUM'
+check(professions.layers==nil and ProfessionsFrame.strata=='MEDIUM'
     and cards[1].StatusBar.level-cards[1].level==-101
     and cards[1].StatusBar.Rank.level-cards[1].StatusBar.level==4,
     'reset restores original relative profession bar and rank layers')
 check(crafting.RankBar.level-crafting.level==-99, 'reset restores original crafting rank bar layer')
 ProfessionsBookFrame=frame('ProfessionsBookFrame',UIParent)
-ProfessionsBookFrame.ProfessionsContentFrame=content
+local standaloneContent=frame(nil,ProfessionsBookFrame); standaloneContent.level=100
+ProfessionsBookFrame.ProfessionsContentFrame=standaloneContent
+local standaloneCard=frame(nil,standaloneContent); standaloneCard.level=101
+standaloneContent.PrimaryProfession1=standaloneCard
+local standaloneBar=frame(nil,standaloneCard); standaloneBar.level=1; standaloneBar.strata='HIGH'
+standaloneCard.StatusBar=standaloneBar
 W.Scan()
 local standaloneBook=W.records.ProfessionsBookFrame
 W.Start(standaloneBook); W.Stop(standaloneBook)
-check(cards[1].StatusBar.level>cards[1].level, 'standalone profession book also keeps bars above cards')
+check(standaloneBar.level>standaloneContent.level, 'standalone profession book also keeps bars above cards')
+closeWindows()
+LFGParentFrame=frame('LFGParentFrame',UIParent)
+UIPanelWindows.LFGParentFrame={area='left'}
+local who=frame('LFGWhoListFrame',LFGParentFrame); who.level=100
+who.TitleContainer=frame(nil,who); who.TitleContainer.level=510
+local whoInset=frame(nil,who); whoInset.level=500
+local whoList=frame(nil,whoInset); whoList.level=501
+local whoEdit=frame('WhoFrameEditBox',who); whoEdit.strata='HIGH'; whoEdit.level=1
+local whoSearch=frame(nil,who); whoSearch.strata='HIGH'; whoSearch.level=2
+local whoTooltip=frame(nil,who); whoTooltip.strata='TOOLTIP'; whoTooltip.level=3
+local whoDialog=frame(nil,who); whoDialog.strata='DIALOG'; whoDialog.level=4
+local forbidden=frame(nil,who); forbidden.forbidden=true
+function forbidden:GetFrameStrata() error('must not inspect forbidden frame') end
+W.Scan(true); local lfg=W.records.LFGParentFrame
+check(lfg and not W.records.LFGWhoListFrame, 'Who tab moves with its LFG owner rather than becoming a separate window')
+ShowUIPanel(LFGParentFrame)
+W.Start(lfg); W.Stop(lfg)
+check(whoEdit.level>whoInset.level and whoSearch.level>whoInset.level
+    and whoList.level>whoInset.level, 'Who search, action and list stay above native background after dragging')
+check(whoTooltip.strata=='TOOLTIP' and whoTooltip.level==3 and whoDialog.strata=='DIALOG' and whoDialog.level==4,
+    'tooltips and modal dialogs retain their native layers')
+local lateRow=frame(nil,whoList); lateRow.strata=whoList.strata; lateRow.level=whoList.level+1
+W.Front(lfg)
+check(lateRow.level>whoList.level and whoEdit.level>lateRow.level, 'late pooled Who rows stay above list background and below search overlay')
+lateRow.parent=UIParent
+W.Front(lfg)
+local removedLevel=lateRow.level
+W.Front(lfg)
+check(not lfg.layers.byFrame[lateRow] and lateRow.level==removedLevel, 'reparented widgets leave the layer cache and are no longer changed')
+HideUIPanel(LFGParentFrame); drain(); ShowUIPanel(LFGParentFrame)
+check(whoEdit.level>who.TitleContainer.level and whoSearch.level>whoInset.level,
+    'reopened Who controls retain the full native strata ordering above high-level title art')
+W.Reset(lfg)
+check(whoEdit.strata=='HIGH' and whoEdit.level==1 and whoInset.strata=='MEDIUM' and whoInset.level==500
+    and whoList.level==501 and who.TitleContainer.level==510, 'Who reset restores original strata and levels exactly')
+do
+    local label='Other mixed-layer windows'
+    local owner=frame('LayerAudit',UIParent)
+    local art=frame(nil,owner); art.level=510
+    local low=frame(nil,owner); low.strata='LOW'; low.level=900
+    local overlay=frame(nil,owner); overlay.strata='HIGH'; overlay.level=1
+    local detail=frame(nil,overlay); detail.strata='HIGH'; detail.level=5
+    local peer=frame(nil,overlay); peer.strata='HIGH'; peer.level=5
+    W.Attach(owner,true); local record=W.records[owner.name]
+    owner:Show(); W.Start(record); W.Stop(record)
+    check(low.level<owner.level and overlay.level>art.level and detail.level>overlay.level,
+        label..': mixed strata retain native drawing order')
+    check(peer.level==detail.level, 'equal native levels remain equal to preserve draw-layer and sibling ordering')
+    local firstSpan=detail.level-low.level
+    W.Front(record); W.Front(record)
+    check(detail.level-low.level==firstSpan, label..': repeated raises do not inflate internal level spacing')
+    W.Reset(record)
+    check(low.strata=='LOW' and low.level==900 and overlay.strata=='HIGH' and overlay.level==1
+        and detail.level==5 and art.level==510, label..': default restores every original layer')
+    owner:Hide()
+end
+ShowUIPanel(WorldMapFrame); ShowUIPanel(LFGParentFrame)
+W.Start(lfg); W.Stop(lfg)
+check(LFGParentFrame.level>WorldMapFrame.level, 'last raised custom window is above another custom window')
 W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
 local persisted=ForeverQoLDB.windowPositions.CharacterFrame
 -- Simulate fresh UI objects and module state using the existing saved variables.
