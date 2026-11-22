@@ -3,7 +3,7 @@ local job, controls
 local headerSpace = 44
 
 function F.LayoutBankControls()
-    if not controls then return end
+    if not controls or InCombatLockdown() then return end
     local panel = BankFrame.BankPanel
     -- Blizzard owns the body's height and recalculates it for each page. Add
     -- our header to that height, never to the already-expanded outer frame.
@@ -23,7 +23,7 @@ function F.LayoutBankControls()
 end
 
 local function LayoutPageTabs()
-    if not BankFrame.bankPageTabPool then return end
+    if InCombatLockdown() or not BankFrame.bankPageTabPool then return end
     for tab in BankFrame.bankPageTabPool:EnumerateActive() do
         local point, relativeTo, relativePoint, x = tab:GetPoint(1)
         if relativeTo == BankFrame and point == 'TOPLEFT' and relativePoint == 'TOPRIGHT' then
@@ -149,7 +149,7 @@ local function Tooltip(button, text, deposit)
 end
 
 function F.AttachBankControls()
-    if controls or not BankFrame or not BankFrame.BankPanel or not BankFrame.BankItemSearchBox or not F.filters then return end
+    if InCombatLockdown() or controls or not BankFrame or not BankFrame.BankPanel or not BankFrame.BankItemSearchBox or not F.filters then return end
     controls = {}
     -- A plain layout container has no inherited full-parent anchors, elevated
     -- NineSlice frame level, border, or background to cover the bank contents.

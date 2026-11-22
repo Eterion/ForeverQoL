@@ -1,13 +1,7 @@
 local _, F = ...
 local W = { records = {} }
 F.Windows = W
-local positions, activeDrag, scanQueued, scanning, panelHooked, bagsHooked, attributeHooked
-local interactions = {
-    BankFrame=true, MerchantFrame=true, MailFrame=true, OpenMailFrame=true,
-    TradeFrame=true, QuestFrame=true, GossipFrame=true, ClassTrainerFrame=true,
-    TrainerFrame=true, AuctionFrame=true, AuctionHouseFrame=true, PetStableFrame=true,
-    StableFrame=true, VoidStorageFrame=true,
-}
+local positions, activeDrag, scanQueued, scanning, panelHooked, bagsHooked
 local names = {
     'CharacterFrame', 'PlayerSpellsFrame', 'SpellBookFrame', 'WorldMapFrame',
     'QuestLogFrame', 'QuestFrame', 'GossipFrame', 'MerchantFrame', 'BankFrame',
@@ -16,9 +10,12 @@ local names = {
     'ProfessionsCustomerOrdersFrame', 'LFGParentFrame', 'FriendsFrame', 'SocialUIFrame', 'GuildFrame',
     'CommunitiesFrame', 'InspectFrame', 'DressUpFrame', 'CollectionsJournal', 'EncounterJournal',
     'AchievementFrame', 'ItemTextFrame', 'ItemSocketingFrame', 'ItemUpgradeFrame',
-    'CalendarFrame', 'SettingsPanel', 'GameMenuFrame', 'AddonList', 'HelpFrame',
+    'CalendarFrame',
     'PetStableFrame', 'StableFrame', 'VoidStorageFrame', 'ContainerFrameCombinedBags',
 }
+local supported = {}
+for _, name in ipairs(names) do supported[name] = true end
+for index = 1, NUM_CONTAINER_FRAMES or 6 do supported['ContainerFrame' .. index] = true end
 
 local function Allowed(frame)
     return not InCombatLockdown() and not (frame.IsForbidden and frame:IsForbidden())
@@ -39,72 +36,6 @@ local function CapturePoints(frame)
     return points
 end
 
-local function Managed(frame)
-    if not GetUIPanel then return false end
-    for _, slot in ipairs({'left', 'center', 'right', 'doublewide', 'fullscreen'}) do
-        if GetUIPanel(slot) == frame then return true end
-    end
-    return false
-end
-
-local function ReleasePanel(record)
-    local frame, scripts = record.frame, {}
-    -- The public panel API removes the secure slot by hiding the frame.
-    -- Preserve its live interaction during this synchronous hide/show: native
-    -- OnHide handlers otherwise close banks, trade skills, merchants, etc.
-    local function Collect(widget)
-        if widget.IsForbidden and widget:IsForbidden() then return false end
-        for _, event in ipairs({'OnHide', 'OnShow'}) do
-            local handler = widget:GetScript(event)
-            if handler then scripts[#scripts + 1] = {frame=widget, event=event, handler=handler} end
-        end
-        for _, child in ipairs({widget:GetChildren()}) do if not Collect(child) then return false end end
-        return true
-    end
-    if not Collect(frame) then return false end
-    record.detaching = true
-    local ok, message = pcall(function()
-        for _, script in ipairs(scripts) do script.frame:SetScript(script.event, nil) end
-        HideUIPanel(frame)
-        if not Managed(frame) then frame:SetAttributeNoHandler('UIPanelLayout-area', nil) end
-    end)
-    -- No rendered frame elapses while the window is hidden. Show it while its
-    -- lifecycle handlers are still suspended, then restore every handler.
-    local shown, showMessage = pcall(function()
-        if not frame:IsShown() then ShowUIPanel(frame) end
-        if not frame:IsShown() then frame:Show() end
-    end)
-    for _, script in ipairs(scripts) do script.frame:SetScript(script.event, script.handler) end
-    record.detaching = nil
-    if not ok or not shown then F.Print('Could not release window layout: ' .. tostring(message or showMessage)) end
-    return ok and shown and frame:IsShown() and not Managed(frame)
-end
-
-local function Detach(record, releaseLive)
-    local frame = record.frame
-    if not record.panel then return true end
-    if record.detached then
-        -- Native mode changes can update the area while combat defers us.
-        if Allowed(frame) then frame:SetAttributeNoHandler('UIPanelLayout-area', nil) end
-        return true
-    end
-    if not Allowed(frame) then return false end
-    -- Preserve native metadata and show/hide functions. An empty area makes
-    -- Forever's ShowUIPanel/HideUIPanel use their ordinary floating-frame path.
-    if not frame:GetAttribute('UIPanelLayout-defined') then
-        for key, value in pairs(record.panel) do frame:SetAttributeNoHandler('UIPanelLayout-' .. key, value) end
-        frame:SetAttributeNoHandler('UIPanelLayout-defined', true)
-    end
-    record.nativeArea = frame:GetAttribute('UIPanelLayout-area') or record.nativeArea or record.panel.area
-    if Managed(frame) and (not releaseLive or not ReleasePanel(record)) then return false end
-    frame:SetAttributeNoHandler('UIPanelLayout-area', nil)
-    record.detached = true
-    local found
-    for _, special in ipairs(UISpecialFrames) do if special == record.name then found = true; break end end
-    if not found then UISpecialFrames[#UISpecialFrames + 1] = record.name; record.escapeAdded = true end
-    return true
-end
-
 local function Default(record)
     local frame = record.frame
     if #record.defaults > 0 then
@@ -122,34 +53,19 @@ end
 local function RaiseWindow(record)
     record.frame:Raise()
 end
-local function RestoreNative(record)
-    if record.detached then
-        record.frame:SetAttributeNoHandler('UIPanelLayout-area', record.nativeArea or record.panel.area)
-        record.detached = nil
-    end
-    if record.escapeAdded then
-        for index = #UISpecialFrames, 1, -1 do
-            if UISpecialFrames[index] == record.name then table.remove(UISpecialFrames, index) end
-        end
-        record.escapeAdded = nil
-    end
-end
-
 function W.Front(record)
     if not positions[record.name] or not Allowed(record.frame) or not record.frame:IsShown() then return end
     RaiseWindow(record)
 end
 
 function W.Apply(record)
-    if not positions or record.applying or record.moving or record.detaching or not Allowed(record.frame) then return end
+    if not positions or record.applying or record.moving or not Allowed(record.frame) then return end
     local position = positions[record.name]
     if not position then return end
     if type(position) ~= 'table' or not Finite(position.x) or not Finite(position.y) then
         positions[record.name] = nil
-        RestoreNative(record)
         return
     end
-    Detach(record)
     local frame, width, height = record.frame, UIParent:GetWidth(), UIParent:GetHeight()
     local scale = Scale(frame)
     if width <= 0 or height <= 0 or scale <= 0 then return end
@@ -163,7 +79,7 @@ function W.Apply(record)
 end
 
 function W.Stop(record)
-    if not record or not record.moving or record.detaching then return end
+    if not record or not record.moving then return end
     local frame = record.frame
     if InCombatLockdown() and frame:IsProtected() then record.pendingStop = true; return end
     frame:StopMovingOrSizing()
@@ -174,7 +90,6 @@ function W.Stop(record)
         positions[record.name] = {x = left * scale / width, y = top * scale / height}
     end
     frame:SetUserPlaced(false) -- SavedVariables own persistence, not layout-cache.txt.
-    if positions[record.name] then Detach(record, true) end
     W.Apply(record)
 end
 
@@ -195,21 +110,13 @@ function W.Reset(record)
     W.Stop(record)
     positions[record.name] = nil
     record.applying = true
-    RestoreNative(record)
     if record.bag and UpdateContainerFrameAnchors then
         record.frame:SetUserPlaced(false)
         UpdateContainerFrameAnchors()
     elseif record.panel then
         record.frame:SetUserPlaced(false)
-        if Managed(record.frame) then
+        if record.frame:IsShown() then
             UpdateUIPanelPositions(record.frame)
-        elseif record.frame:IsShown() then
-            -- Re-enter the real panel manager so its current width, area,
-            -- minimize offsets, and other open panels determine placement.
-            HideUIPanel(record.frame, true)
-            -- NPC windows own a server interaction; do not resurrect a closed
-            -- bank/merchant/etc. Reopening the interaction uses native layout.
-            if not interactions[record.name] then ShowUIPanel(record.frame) end
         end
     else
         Default(record)
@@ -225,17 +132,14 @@ local function Menu(record, owner)
     end)
 end
 
-function W.Attach(frame, explicit)
+function W.Attach(frame)
     if not positions or not frame or not frame.GetName or not frame.HookScript then return end
+    if frame.IsForbidden and frame:IsForbidden() then return end
     local name = frame:GetName()
-    if not name or W.records[name] or (frame.IsForbidden and frame:IsForbidden()) then return end
+    if not name or not supported[name] or W.records[name] then return end
     local panel = UIPanelWindows and UIPanelWindows[name]
     if panel and (panel.area == 'full' or panel.area == 'fullscreen') then return end
     local title = frame.TitleContainer
-    if not explicit and not panel then
-        local root = frame:GetParent() == UIParent or frame:IsToplevel()
-        if not root or not (title or frame.TitleText or frame.titleText) or frame:GetWidth() < 150 or frame:GetHeight() < 80 then return end
-    end
     if InCombatLockdown() then return end -- Retry registration after combat.
     local record = {name = name, frame = frame, defaults = CapturePoints(frame), panel = panel,
         bag = name:match('^ContainerFrame') ~= nil}
@@ -268,7 +172,7 @@ function W.Attach(frame, explicit)
     end)
     handle:SetScript('OnClick', function(self, button) if button == 'RightButton' then Menu(record, self) end end)
     frame:HookScript('OnShow', function()
-        if record.detaching or not Allowed(frame) then return end
+        if not Allowed(frame) then return end
         if not positions[name] and not record.panel and frame:GetNumPoints() == 0 then
             record.applying = true; Default(record); record.applying = nil
         end
@@ -276,41 +180,32 @@ function W.Attach(frame, explicit)
         W.Front(record)
     end)
     frame:HookScript('OnHide', function()
-        if record.detaching then return end
         W.Stop(record)
-        if positions[name] and not record.detached then C_Timer.After(0, function()
-            if positions[name] then Detach(record) end
-        end) end
     end)
     frame:HookScript('OnSizeChanged', function() W.Apply(record) end)
     hooksecurefunc(frame, 'SetPoint', function() if not record.bag then W.Apply(record) end end)
     W.Apply(record)
 end
 
-function W.Scan(generic)
+function W.Scan()
     if not positions or InCombatLockdown() or scanning then return end
     scanning = true
-    for _, name in ipairs(names) do W.Attach(_G[name], true) end
-    for index = 1, NUM_CONTAINER_FRAMES or 6 do W.Attach(_G['ContainerFrame' .. index], true) end
-    for name in pairs(UIPanelWindows or {}) do W.Attach(_G[name], true) end
-    if generic and EnumerateFrames then
-        local frame = EnumerateFrames()
-        while frame do W.Attach(frame); frame = EnumerateFrames(frame) end
-    end
+    for _, name in ipairs(names) do W.Attach(_G[name]) end
+    for index = 1, NUM_CONTAINER_FRAMES or 6 do W.Attach(_G['ContainerFrame' .. index]) end
     scanning = nil
 end
 
 function W.QueueScan()
     if scanQueued then return end
     scanQueued = true
-    C_Timer.After(0.1, function() scanQueued = nil; W.Scan(true) end)
+    C_Timer.After(0.1, function() scanQueued = nil; W.Scan() end)
 end
 
 function W.Initialize()
     if type(ForeverQoLDB.windowPositions) ~= 'table' then ForeverQoLDB.windowPositions = {} end
     positions = ForeverQoLDB.windowPositions
     W.InstallHooks()
-    W.Scan(true)
+    W.Scan()
 end
 
 local events = CreateFrame('Frame')
@@ -319,11 +214,11 @@ for _, event in ipairs({'ADDON_LOADED', 'PLAYER_LOGIN', 'PLAYER_REGEN_DISABLED',
 events:SetScript('OnEvent', function(_, event)
     if not positions then return end
     if event == 'ADDON_LOADED' then W.InstallHooks(); W.Scan(); W.QueueScan()
-    elseif event == 'PLAYER_LOGIN' then W.Scan(true)
+    elseif event == 'PLAYER_LOGIN' then W.Scan()
     elseif event == 'PLAYER_REGEN_DISABLED' then W.Stop(activeDrag)
     elseif event == 'PLAYER_REGEN_ENABLED' then
         W.Stop(activeDrag)
-        W.Scan(true)
+        W.Scan()
         for _, record in pairs(W.records) do W.Apply(record) end
     else
         for _, record in pairs(W.records) do W.Apply(record) end
@@ -336,7 +231,7 @@ function W.InstallHooks()
     if not panelHooked and ShowUIPanel then
         panelHooked = true
         hooksecurefunc('ShowUIPanel', function(frame)
-            W.Attach(frame, true)
+            W.Attach(frame)
             if frame and W.records[frame:GetName()] then W.Apply(W.records[frame:GetName()]) end
         end)
     end
@@ -344,18 +239,6 @@ function W.InstallHooks()
         bagsHooked = true
         hooksecurefunc('UpdateContainerFrameAnchors', function()
             for _, record in pairs(W.records) do if record.bag then W.Apply(record) end end
-        end)
-    end
-    if not attributeHooked and SetUIPanelAttribute then
-        attributeHooked = true
-        hooksecurefunc('SetUIPanelAttribute', function(frame, key, value)
-            local record = frame and W.records[frame:GetName()]
-            if record and key == 'area' and value ~= nil then
-                record.nativeArea = value
-                if record.detached and positions[record.name] and Allowed(frame) then
-                    frame:SetAttributeNoHandler('UIPanelLayout-area', nil)
-                end
-            end
         end)
     end
 end

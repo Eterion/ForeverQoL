@@ -1,38 +1,25 @@
-# Movable-window layer audit
+# Window movement safety audit
 
-After installing the development build, use `/reload`. Open professions at its default position, check the progress bars, then drag it and check the bars again. Switch professions and return to the overview; close/reopen and reset the window. Open Looking for Group's Who tab, drag its title, search, and check the results and search controls. Also check Character Skills/Reputation, bags, map controls and collection lists. Native strata retain priority when windows overlap.
+After installing the correction, use `/reload` to start a clean UI session. Open and move professions, Character and bags, then enter and leave combat. Check that action bars remain visible and usable. Run `/fql errors` afterwards. A zero count is evidence for that session, not proof that every taint path has been eliminated.
 
-## Source findings
+## Current boundaries
 
-Inspected the public [Forever UI source](https://github.com/Gethe/wow-ui-source/tree/734f065329cff4992835b01a84f210a297db91b6/Interface/AddOns) on 2026-11-22. These are source findings, not reports of live in-game failures for every window. Camelot files take precedence where the package selects them; shared/Mainline files are also used by this client.
+The mover applies saved coordinates to an explicit list of ordinary Blizzard windows and bags. It uses secure post-hooks and its own transparent title handles. It does not replace Blizzard lifecycle scripts, write native panel attributes, rewrite child drawing layers, scan arbitrary UI frames, or move action bars, unit frames or system menus. All movement/layout operations are deferred or refused during combat. Bank body/tab layout and initial bank-control creation also have combat guards.
 
-| Window family | Separate native layers found |
-| --- | --- |
-| Looking for Group | `WhoList.xml`: HIGH search edit box and search button; parent-frame XML: HIGH eye portrait. The Who tab is a child of `LFGParentFrame`. |
-| Character | Camelot Skills/Reputation XML: HIGH lists, scrollbars and paragon icons; PaperDoll/Character XML: HIGH level info and side panes. |
-| Bags and map | ContainerFrame XML: HIGH count container. WorldMapFrameTemplates XML: HIGH bounty, activity and action controls. |
-| Professions | Camelot profession-book templates and crafting XML: HIGH rank bars over pages with explicit frame levels. |
-| Achievements and collections | HIGH lists/scrollbars in AchievementUI and Collections templates. |
-| Encounter Journal | HIGH lore scrolling controls and loot containers. |
-| Friends and calendar | HIGH broadcast and calendar detail/scrolling controls. |
-| Spellbook/talents, auctions and trainer | HIGH help/talent overlays, auction favorites and trainer controls. |
+Blizzard owns panel occupancy and visibility. Opening another panel can reserve space, rearrange other panels or close a moved window. Immediate release of a moved window's native slot and independent panel overlap are not provided. Reopening calls native Raise(), which retains Blizzard strata priority. Reset clears the saved position and delegates to native layout without synthesizing hide/show events.
 
-Promoting a window root to HIGH collapses the distinction between its background and explicit HIGH controls. The owner confirmed that profession bars worked at the default position but disappeared on dragging in dev.14. The shared descendant-layer remapping was not reliable in game, despite passing mocks, and has been removed along with forced root-strata changes.
+## Investigation findings
 
-## Native layering and BlizzMove comparison
+The owner reported blocked interface actions attributed to ForeverQoL and intermittently disappearing action bars after dev.16. The first-drag handoff replaced native OnHide/OnShow handlers, including descendant handlers, around a synthetic hide/show. Restoring the same function reference does not prove that its secure execution state is restored. The handoff was removed. Native UIPanelLayout attribute edits and broad generic-frame discovery were also removed to reduce the potential taint surface.
 
-Reviewed the current [BlizzMove movement code](https://github.com/Kiatra/BlizzMove/blob/master/BlizzMove.lua) and [profession frame registration](https://github.com/Kiatra/BlizzMove/blob/master/Frames.lua) on 2026-11-22. Normal movement does not rewrite window/descendant strata or levels. Its debug capture overlay and its own move handles set their own layers; those are separate from moving the original window. Profession registration contains no rank-bar layering workaround. This is source evidence, not proof that BlizzMove never has rendering bugs in any client.
+The script replacement is a credible taint source. No exact blocked-function trace was available locally, so the cause of the disappearing action bars is not established. The AddOns list tracks a count of blocked actions; the reported 100 is not a specific error code. `/fql errors` now records the count and exact last blocked/forbidden function attributed to ForeverQoL since reload, without modifying protected UI or retrying actions.
 
-ForeverQoL now leaves the native drawing hierarchy in place too. Reopening or dragging calls native `Raise()` on the window. There is no descendant scan, cache, sort or rewrite for stacking. The addon's transparent title handle still sets its own level. Position persistence, floating panel layout and native reset are unchanged.
+Reviewed [BlizzMove's movement source](https://github.com/Kiatra/BlizzMove/blob/master/BlizzMove.lua): ordinary movement leaves native drawing layers and lifecycle handlers alone. Its own move handles and debug overlay have their own scripts/levels. ForeverQoL's earlier layer remapping and synthetic lifecycle suppression went beyond that model.
 
-## First-drag layout handoff
-
-When the first drag finishes, release the panel's native slot through public `HideUIPanel`, clear its native area, and show it through the floating `ShowUIPanel` path in the same synchronous call. Temporarily suspend the window/subtree's base OnHide/OnShow scripts so the handoff does not close a profession or NPC interaction, then restore the exact handler functions. The mover guards its own persistent hooks during this handoff. No render interval elapses between hide and show. This uses public APIs rather than accessing the forbidden frame-position delegate. Native panels left open are relaid out normally.
-
-The subtree is inspected only for this initial handoff, not on every raise. Forbidden subtrees keep the previous deferred-release fallback. Combat restrictions still apply. Other addons' hooks and protected-client behavior need live testing. Regression cases cover professions then untouched Character, child lifecycle handlers, a protected bank outside combat, genuine closes after handoff and restoration following an API error.
-
-Native `Raise()` operates within a strata, so a higher-strata window can remain above a lower-strata window opened later. Strict last-opened ordering across different native strata is not supported by this implementation. That earlier requirement remains a limitation rather than being simulated by rewriting child layers.
+The [Forever UI source](https://github.com/Gethe/wow-ui-source/tree/forever/Interface/AddOns) contains explicit HIGH overlays in Who search, professions rank bars, Character Skills/Reputation, bag counts, map controls, collections and achievements. Moving those controls into their background's strata can obscure them, so the mover leaves all those native drawing layers untouched.
 
 ## Verification boundary
 
-Automated cases cover default-to-dragged profession bars, rank text/dropdowns, reopening, native page-level changes, crafting and standalone bars, Who search/list layers, late pooled rows, forbidden widgets, dialogs/tooltips, and mixed LOW/MEDIUM/HIGH ordering. The frame mock propagates parent frame-level changes to children in the same strata. Assertions check native drawing priority and that the mover never writes native strata. Tests do not establish pixel rendering, hit testing, protected-frame behavior or third-party-addon compatibility in the game. Those still require the live checks above.
+Regression fixtures reject addon writes to Blizzard-owned lifecycle scripts and panel attributes, fail on generic UI enumeration, and verify that protected action bars/system menus are not attached even if they resemble titled panels. Cases cover saved position/reset, compact/expanded spellbook, native lifecycle cleanup, progress-bar strata, fresh-session persistence, bag anchoring, clamping and combat-deferred operations. Bank tests cover the combat layout guard. Diagnostics tests cover count/function output and ignoring other addons.
+
+These are offline structural and behavior checks. They do not emulate the client's taint propagation, secure execution, rendering or combat state machine. Live reproduction after a clean reload is still required. Previous passing mock tests were insufficient evidence of in-game safety.

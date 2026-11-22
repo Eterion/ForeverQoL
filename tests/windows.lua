@@ -71,11 +71,17 @@ local function frame(name, parent, width, height)
         self:SetFrameLevel(level)
     end
     function f:GetAttribute(key) return self.attrs[key] end
-    function f:SetAttributeNoHandler(key, value) mutate(self); self.attrs[key]=value end
+    function f:SetAttributeNoHandler(key, value)
+        assert(not self.nativeOwned, 'addon rewrote a Blizzard panel attribute')
+        mutate(self); self.attrs[key]=value
+    end
     function f:RegisterForDrag(...) self.dragButtons={...} end
     function f:RegisterForClicks(...) self.clickButtons={...} end
     function f:RegisterEvent() end
-    function f:SetScript(event, callback) self.scripts[event]=callback; if event=='OnEvent' then eventHandler=callback end end
+    function f:SetScript(event, callback)
+        assert(not self.nativeOwned, 'addon replaced a Blizzard lifecycle script')
+        self.scripts[event]=callback; if event=='OnEvent' then eventHandler=callback end
+    end
     function f:GetScript(event) return self.scripts[event] end
     function f:HookScript(event, callback)
         self.hooks[event]=self.hooks[event] or {}
@@ -151,7 +157,7 @@ SetUIPanelAttribute=function(f,key,value)
         for k,v in pairs(UIPanelWindows[f.name]) do f.attrs['UIPanelLayout-'..k]=v end
         f.attrs['UIPanelLayout-defined']=true
     end
-    f:SetAttributeNoHandler('UIPanelLayout-'..key,value)
+    f.attrs['UIPanelLayout-'..key]=value -- Native game-side attribute change.
 end
 local bagLayouts=0
 UpdateContainerFrameAnchors=function()
@@ -184,350 +190,123 @@ MerchantFrame=frame('MerchantFrame',UIParent)
 BankFrame=frame('BankFrame',UIParent,480,504)
 BankFrame:SetPoint('TOPLEFT',UIParent,'TOPLEFT',16,-100)
 ForeverQoLDB={}
+local nativeClosed=0
+local nativeOnHide=function() nativeClosed=nativeClosed+1 end
+CharacterFrame:SetScript('OnHide',nativeOnHide)
+for _,f in ipairs({CharacterFrame,MerchantFrame,BankFrame}) do f.nativeOwned=true end
+-- Fail immediately if the mover scans unrelated UI or rewrites native scripts
+-- or attributes. Mock layout checks alone cannot model real client taint.
+EnumerateFrames=function() error('must not enumerate unrelated UI') end
 local F={Print=function() end}
 assert(loadfile(root..'/addon/ForeverQoL/Windows.lua'))('ForeverQoL',F)
 local W=F.Windows
 W.InstallHooks(); W.Initialize()
-local character, merchant, bank=W.records.CharacterFrame,W.records.MerchantFrame,W.records.BankFrame
-check(character and merchant and bank, 'registers ordinary Blizzard windows')
-check(character.handle.parent==CharacterFrame and character.handle.height==20 and character.handle.level==511, 'transparent title-only handle above native title')
-check(character.handle.points[2][4]==-44, 'title handle leaves close and maximize controls unobstructed')
-check(character.handle.dragButtons[1]=='LeftButton', 'drag uses ordinary left button without modifiers')
-check(not character.detached and not CharacterFrame.attrs['UIPanelLayout-defined'], 'unmoved windows retain native panel arrangement')
-check(UIPanelWindows.CharacterFrame.area=='left', 'preserves native registry')
-check(#UISpecialFrames==0, 'default panels do not get addon Escape registrations')
-ShowUIPanel(CharacterFrame); ShowUIPanel(MerchantFrame); ShowUIPanel(BankFrame)
-check(CharacterFrame.shown and MerchantFrame.shown and BankFrame.shown and slots.left==CharacterFrame, 'default windows are laid out by native panel manager')
-check(CharacterFrame.points[1][4]==21 and CharacterFrame.points[1][5]==-100, 'unanchored panel gets native default offsets')
-character.handle.scripts.OnDragStart()
-check(CharacterFrame.dragging and character.moving and CharacterFrame.raised>0, 'title drag starts movement and raises window')
-CharacterFrame.left,CharacterFrame.top=600,800
-character.handle.scripts.OnDragStop()
-local saved=ForeverQoLDB.windowPositions.CharacterFrame
-check(near(saved.x,600/1920) and near(saved.y,800/1080), 'saved position contains normalized screen coordinates')
-check(not CharacterFrame.userPlaced and CharacterFrame.dontSave, 'addon owns persistence without polluting native layout cache')
-HideUIPanel(CharacterFrame); drain(); ShowUIPanel(CharacterFrame)
-check(near(CharacterFrame.left,600) and near(CharacterFrame.top,800), 'position restored on reopen')
-check(character.detached and CharacterFrame.strata=='MEDIUM', 'custom window floats while retaining its native strata')
-CharacterFrame:ClearAllPoints(); CharacterFrame:SetPoint('CENTER',UIParent,'CENTER',0,0)
-check(CharacterFrame.points[1][1]=='TOPLEFT' and near(CharacterFrame.left,600), 'native reposition cannot snap saved window back')
+local character,merchant,bank=W.records.CharacterFrame,W.records.MerchantFrame,W.records.BankFrame
+check(character and merchant and bank, 'registers supported windows')
+check(character.handle.height==20 and character.handle.level==511, 'addon title handle clears native title and close controls')
+check(CharacterFrame:GetScript('OnHide')==nativeOnHide and #UISpecialFrames==0, 'registration preserves native scripts and Escape list')
+for _,name in ipairs({'MultiBarBottomLeft','MainMenuBar','GameMenuFrame','AddonList','SettingsPanel','MyAddonWindow'}) do
+    local unsupported=frame(name,UIParent); unsupported.TitleText={}; unsupported.protected=true; unsupported.nativeOwned=true
+    _G[name]=unsupported; UIPanelWindows[name]={area='left'}
+    W.Attach(unsupported,true)
+    check(not W.records[name] and not unsupported.movable, 'does not attach action bars, system menus or arbitrary titled windows: '..name)
+end
+W.Scan(true)
+ShowUIPanel(CharacterFrame)
+check(slots.left==CharacterFrame and CharacterFrame.points[1][4]==21, 'default panel uses native placement')
+W.Start(character); CharacterFrame.left,CharacterFrame.top=600,800; W.Stop(character)
+check(near(ForeverQoLDB.windowPositions.CharacterFrame.x,600/1920), 'drag saves normalized position')
+check(slots.left==CharacterFrame and CharacterFrame.attrs['UIPanelLayout-area']=='left' and nativeClosed==0,
+    'drag preserves secure panel ownership and does not synthesize hide/show')
+check(CharacterFrame.strata=='MEDIUM' and not CharacterFrame.strataWrites, 'drag keeps native rendering layers')
+HideUIPanel(CharacterFrame); ShowUIPanel(CharacterFrame)
+check(nativeClosed==1 and near(CharacterFrame.left,600) and near(CharacterFrame.top,800), 'normal reopen restores position and real close still runs native cleanup')
 character.handle.scripts.OnClick(character.handle,'RightButton')
-check(menu.label=='Reset to default' and menu.enabled and menu.owner==character.handle, 'right-click title opens reset dropdown')
+check(menu.label=='Reset to default' and menu.enabled, 'title menu offers reset')
 menu.callback()
-check(ForeverQoLDB.windowPositions.CharacterFrame==nil and slots.left==CharacterFrame, 'reset clears saved position and re-enters native layout')
-check(CharacterFrame.attrs['UIPanelLayout-area']=='left' and CharacterFrame.strata=='MEDIUM', 'reset restores native area and drawing layer')
-check(not character.escapeAdded, 'reset removes addon-only Escape registration')
-character.handle.scripts.OnDragStart(); CharacterFrame.left,CharacterFrame.top=500,800; character.handle.scripts.OnDragStop()
-CharacterFrame.scale=0.5
-W.Apply(character)
-check(near(CharacterFrame.left,1000) and near(CharacterFrame.top,1600), 'saved placement accounts for effective scale')
-CharacterFrame.scale=1
+check(not ForeverQoLDB.windowPositions.CharacterFrame and CharacterFrame.points[1][4]==21 and nativeClosed==1,
+    'reset delegates placement to Blizzard without closing window or replacing handlers')
+W.Start(character); CharacterFrame.left,CharacterFrame.top=500,800; W.Stop(character)
 UIParent.width,UIParent.height=1280,720
 eventHandler(nil,'DISPLAY_SIZE_CHANGED')
-check(near(CharacterFrame.left,500*1280/1920) and near(CharacterFrame.top,800*720/1080), 'screen resize restores proportional position')
-ForeverQoLDB.windowPositions.CharacterFrame={x=5,y=-2}
-W.Apply(character)
-check(near(CharacterFrame.left,880) and near(CharacterFrame.top,400), 'offscreen placement clamps entire window into view')
-ForeverQoLDB.windowPositions.CharacterFrame={x=0/0,y=1}
-W.Apply(character)
-check(ForeverQoLDB.windowPositions.CharacterFrame==nil, 'invalid saved coordinates are discarded')
+check(near(CharacterFrame.left,500*1280/1920), 'saved position follows resolution changes')
+ForeverQoLDB.windowPositions.CharacterFrame={x=5,y=-2}; W.Apply(character)
+check(near(CharacterFrame.left,880) and near(CharacterFrame.top,400), 'position clamps to screen')
+ForeverQoLDB.windowPositions.CharacterFrame={x=0/0,y=1}; W.Apply(character)
+check(not ForeverQoLDB.windowPositions.CharacterFrame, 'invalid coordinates discarded without native attribute edits')
 UIParent.width,UIParent.height=1920,1080
-local custom=frame('MyAddonWindow',UIParent)
-custom.TitleText={}
-custom:SetPoint('CENTER',UIParent,'CENTER',30,40)
-W.Scan(true)
-local customRecord=W.records.MyAddonWindow
-check(customRecord~=nil, 'discovers other named titled top-level windows')
-customRecord.handle.scripts.OnDragStart(); custom.left,custom.top=200,700; customRecord.handle.scripts.OnDragStop()
-W.Reset(customRecord)
-check(custom.points[1][1]=='CENTER' and custom.points[1][4]==30, 'non-panel reset restores captured original anchors')
-local forbidden=frame('ForbiddenWindow',UIParent); forbidden.TitleText={}; forbidden.forbidden=true
-W.Attach(forbidden,true)
-check(W.records.ForbiddenWindow==nil, 'forbidden frames excluded')
-local fullscreen=frame('FullscreenWindow',UIParent); UIPanelWindows.FullscreenWindow={area='full'}
-W.Attach(fullscreen,true)
-check(W.records.FullscreenWindow==nil, 'native fullscreen scenes excluded')
-local alreadyOpen=frame('AlreadyOpenPanel',UIParent)
-UIPanelWindows.AlreadyOpenPanel={area='left'}
-slots.left=alreadyOpen; alreadyOpen.shown=true
-W.Attach(alreadyOpen,true)
-local alreadyOpenRecord=W.records.AlreadyOpenPanel
-check(not alreadyOpenRecord.detached and alreadyOpen.shown, 'already-managed live panel is not hidden or removed from secure slots mid-interaction')
-ForeverQoLDB.windowPositions.AlreadyOpenPanel={x=.2,y=.8}
-alreadyOpen:Hide(); slots.left=nil; drain()
-check(alreadyOpenRecord.detached and alreadyOpen.attrs['UIPanelLayout-area']==nil, 'already-managed panel detaches safely after its native hide completes')
-local specialCount=#UISpecialFrames
-W.Scan(true)
-check(#UISpecialFrames==specialCount, 'repeated discovery does not duplicate Escape registrations')
 BankFrame.protected=true
 combat=true
-W.Start(bank)
-check(not bank.moving and not BankFrame.dragging, 'movement blocked during combat')
-local late=frame('LateWindow',UIParent); late.TitleText={}; _G.LateWindow=late
-W.Attach(late,true)
-check(W.records.LateWindow==nil, 'protected registration deferred in combat')
+W.Start(bank); W.Apply(bank); W.Reset(bank); W.Scan()
+check(not bank.moving, 'protected window operations blocked in combat')
 combat=false
-eventHandler(nil,'PLAYER_REGEN_ENABLED')
-check(W.records.LateWindow~=nil, 'late window discovered when combat ends')
 W.Start(bank); BankFrame.left,BankFrame.top=300,900
-combat=true
-eventHandler(nil,'PLAYER_REGEN_DISABLED')
-check(bank.pendingStop, 'protected drag interrupted by combat queues safe stop')
-combat=false
-eventHandler(nil,'PLAYER_REGEN_ENABLED')
-check(not bank.moving and ForeverQoLDB.windowPositions.BankFrame~=nil, 'interrupted drag saved after combat without protected calls')
-local max=false
-BankFrame.IsMaximized=function() return max end
-max=true
+combat=true; eventHandler(nil,'PLAYER_REGEN_DISABLED')
+check(bank.pendingStop, 'protected drag stop is deferred in combat')
+combat=false; eventHandler(nil,'PLAYER_REGEN_ENABLED')
+check(not bank.moving and ForeverQoLDB.windowPositions.BankFrame, 'deferred stop saves position outside combat')
+local maximized=true
+BankFrame.IsMaximized=function() return maximized end
 W.Start(bank)
-check(not bank.moving, 'maximized window is not dragged')
-max=false
-ContainerFrame1=frame('ContainerFrame1',UIParent,180,300)
-W.Scan()
-local bag=W.records.ContainerFrame1
+check(not bank.moving, 'maximized window cannot be dragged')
+maximized=false
+ContainerFrame1=frame('ContainerFrame1',UIParent,180,300); ContainerFrame1.nativeOwned=true
+W.Scan(); local bag=W.records.ContainerFrame1
 W.Start(bag); ContainerFrame1.left,ContainerFrame1.top=700,700; W.Stop(bag)
 UpdateContainerFrameAnchors()
-check(near(ContainerFrame1.left,700), 'bag position restored after native layout pass')
+check(near(ContainerFrame1.left,700), 'bag saved position survives native anchor pass')
 W.Reset(bag)
-check(ForeverQoLDB.windowPositions.ContainerFrame1==nil and ContainerFrame1.points[1][1]=='BOTTOMRIGHT' and bagLayouts>=2, 'bag reset invokes native bag arrangement')
+check(not ForeverQoLDB.windowPositions.ContainerFrame1 and ContainerFrame1.points[1][1]=='BOTTOMRIGHT', 'bag reset uses native arrangement')
 local count=#timers
 W.QueueScan(); W.QueueScan(); W.QueueScan()
-check(#timers==count+1, 'load bursts coalesce generic discovery into one scan')
+check(#timers==count+1, 'known-window registration is coalesced')
 drain()
--- Reset must delegate current mode, free-space decisions and panel eviction to
--- Blizzard; a hardcoded coordinate or old area cannot reproduce this behaviour.
 local function closeWindows()
     for _,record in pairs(W.records) do if record.frame.shown then HideUIPanel(record.frame) end end
-    drain()
 end
 closeWindows()
-PlayerSpellsFrame=frame('PlayerSpellsFrame',UIParent,577,500)
-UIPanelWindows.PlayerSpellsFrame={area='centerOrLeft'}
-SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
-SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',-405)
-W.Scan()
-local spells=W.records.PlayerSpellsFrame
+PlayerSpellsFrame=frame('PlayerSpellsFrame',UIParent,577,500); PlayerSpellsFrame.nativeOwned=true
+UIPanelWindows.PlayerSpellsFrame={area='left'}
+SetUIPanelAttribute(PlayerSpellsFrame,'area','left'); SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',-405)
+W.Scan(); local spells=W.records.PlayerSpellsFrame
 ShowUIPanel(PlayerSpellsFrame)
 W.Start(spells); PlayerSpellsFrame.left,PlayerSpellsFrame.top=450,850; W.Stop(spells)
-HideUIPanel(PlayerSpellsFrame); drain(); ShowUIPanel(PlayerSpellsFrame)
-SetUIPanelAttribute(PlayerSpellsFrame,'area','centerOrLeft')
-SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',0)
-PlayerSpellsFrame:SetWidth(1154)
-check(spells.nativeArea=='centerOrLeft' and PlayerSpellsFrame.attrs['UIPanelLayout-area']==nil, 'expanded custom spellbook remembers new native area while remaining floating')
-combat=true
-SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
-combat=false
-eventHandler(nil,'PLAYER_REGEN_ENABLED')
-check(spells.nativeArea=='left' and PlayerSpellsFrame.attrs['UIPanelLayout-area']==nil, 'combat-deferred area change returns to floating mode after combat')
-SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
-SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',-405)
-PlayerSpellsFrame:SetWidth(577)
 W.Reset(spells)
-check(PlayerSpellsFrame.attrs['UIPanelLayout-area']=='left' and slots.left==PlayerSpellsFrame
-    and PlayerSpellsFrame.points[1][1]=='TOPLEFT', 'minimized spellbook reset uses live left area rather than centering from registry')
-check(PlayerSpellsFrame.attrs['UIPanelLayout-centerXOffset']==-405, 'reset preserves current minimize offset')
+check(PlayerSpellsFrame.attrs['UIPanelLayout-area']=='left' and PlayerSpellsFrame.points[1][1]=='TOPLEFT', 'compact spellbook reset uses live native left layout')
+check(PlayerSpellsFrame.attrs['UIPanelLayout-centerXOffset']==-405, 'compact offset stays native')
 HideUIPanel(PlayerSpellsFrame)
-SetUIPanelAttribute(PlayerSpellsFrame,'area','centerOrLeft')
-SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',0)
-PlayerSpellsFrame:SetWidth(1154)
-ShowUIPanel(PlayerSpellsFrame)
-check(slots.center==PlayerSpellsFrame and PlayerSpellsFrame.points[1][1]=='TOP', 'expanded default spellbook follows native center-or-left placement')
-HideUIPanel(PlayerSpellsFrame)
-SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
-PlayerSpellsFrame:SetWidth(577)
-ShowUIPanel(PlayerSpellsFrame)
-W.Start(spells); PlayerSpellsFrame.left,PlayerSpellsFrame.top=450,850; W.Stop(spells)
-HideUIPanel(PlayerSpellsFrame); drain()
-ShowUIPanel(MerchantFrame); ShowUIPanel(PlayerSpellsFrame)
-W.Reset(spells)
-check(MerchantFrame.shown and slots.center==PlayerSpellsFrame, 'reset uses available native panel space alongside another default window')
-W.Start(spells); W.Stop(spells)
-HideUIPanel(PlayerSpellsFrame); drain(); ShowUIPanel(PlayerSpellsFrame)
-UIParent.width=700
-W.Reset(spells)
-check(not MerchantFrame.shown and slots.left==PlayerSpellsFrame, 'reset lets native panel manager evict windows when there is not enough space')
-UIParent.width=1920
+SetUIPanelAttribute(PlayerSpellsFrame,'area','centerOrLeft'); SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',0)
+PlayerSpellsFrame:SetWidth(1154); ShowUIPanel(PlayerSpellsFrame)
+W.Start(spells); W.Stop(spells); W.Reset(spells)
+check(slots.center==PlayerSpellsFrame and PlayerSpellsFrame.points[1][1]=='TOP', 'expanded spellbook reset delegates current mode to Blizzard')
 closeWindows()
-WorldMapFrame=frame('WorldMapFrame',UIParent,700,500)
-WorldMapFrame.strata='HIGH'
-UIPanelWindows.WorldMapFrame={area='left'}
-W.Scan()
-local map=W.records.WorldMapFrame
-ShowUIPanel(CharacterFrame)
-W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
-HideUIPanel(CharacterFrame); drain(); ShowUIPanel(CharacterFrame)
-ForeverQoLDB.windowPositions.WorldMapFrame={x=.2,y=.8}
-W.Apply(map); ShowUIPanel(WorldMapFrame)
-check(WorldMapFrame.order>CharacterFrame.order and WorldMapFrame.shown and CharacterFrame.shown, 'opening custom map raises it above overlapping custom character sheet')
-HideUIPanel(CharacterFrame); ShowUIPanel(CharacterFrame)
-check(CharacterFrame.order>WorldMapFrame.order and CharacterFrame.strata=='MEDIUM' and WorldMapFrame.strata=='HIGH'
-    and near(CharacterFrame.left,420), 'reopening raises character sheet at saved position without rewriting native map strata priority')
-HideUIPanel(WorldMapFrame); ShowUIPanel(WorldMapFrame)
-check(WorldMapFrame.order>CharacterFrame.order, 'latest reopened custom window comes to front in either order')
-ShowUIPanel(BankFrame)
-W.Apply(bank)
-W.Reset(bank)
-check(not BankFrame.shown and ForeverQoLDB.windowPositions.BankFrame==nil, 'reset closes detached NPC window without resurrecting ended interaction')
-ShowUIPanel(BankFrame)
-check(slots.left==BankFrame and BankFrame.attrs['UIPanelLayout-area']=='left', 'next NPC interaction uses native default panel management')
-closeWindows()
--- Compare actual native strata first; HIGH widgets need not have larger
--- frame levels than MEDIUM backgrounds to render above them.
-local nativeStrata={BACKGROUND=1,LOW=2,MEDIUM=3,HIGH=4,DIALOG=5,TOOLTIP=6}
-local function above(a,b)
-    if a.strata~=b.strata then return nativeStrata[a.strata]>nativeStrata[b.strata] end
-    return a.level>b.level
-end
-ProfessionsFrame=frame('ProfessionsFrame',UIParent)
-UIPanelWindows.ProfessionsFrame={area='left'}
-local page=frame(nil,ProfessionsFrame); page.level=100
-local content=frame(nil,page); content.level=101
-ProfessionsFrame.BookPage=page; page.ProfessionsContentFrame=content
-local cards={}
-for _,key in ipairs({'PrimaryProfession1','PrimaryProfession2','SecondaryProfession1','SecondaryProfession2','SecondaryProfession3'}) do
-    local card=frame(nil,content); card.level=102; content[key]=card
-    local bar=frame(nil,card); bar.strata='HIGH'; bar.level=1; card.StatusBar=bar
-    bar.Rank=frame(nil,bar); bar.Rank.strata='HIGH'; bar.Rank.level=5
-    bar.ExpansionDropdownButton=frame(nil,bar); bar.ExpansionDropdownButton.strata='HIGH'; bar.ExpansionDropdownButton.level=2
-    cards[#cards+1]=card
-end
-local crafting=frame(nil,ProfessionsFrame); crafting.level=100; ProfessionsFrame.CraftingPage=crafting
-crafting.RankBar=frame(nil,crafting); crafting.RankBar.strata='HIGH'; crafting.RankBar.level=1
+local nativeOpened,professionClosed=0,0
+ProfessionsFrame=frame('ProfessionsFrame',UIParent,673,594)
+ProfessionsFrame:SetScript('OnShow',function() nativeOpened=nativeOpened+1 end)
+ProfessionsFrame:SetScript('OnHide',function() professionClosed=professionClosed+1 end)
+ProfessionsFrame.nativeOwned=true; UIPanelWindows.ProfessionsFrame={area='left'}
+local page=frame(nil,ProfessionsFrame); page.level=100; page.nativeOwned=true
+local bar=frame(nil,page); bar.level=1; bar.strata='HIGH'; bar.nativeOwned=true
 W.Scan(); local professions=W.records.ProfessionsFrame
 ShowUIPanel(ProfessionsFrame)
-check(above(cards[1].StatusBar,cards[1]), 'default profession bar renders above its card using native strata')
-W.Start(professions); W.Stop(professions)
-for _,card in ipairs(cards) do
-    local bar=card.StatusBar
-    check(ProfessionsFrame.strata=='MEDIUM' and above(bar,card) and bar.level==1 and bar.Rank.level==5
-        and bar.ExpansionDropdownButton.level==2 and not bar.strataWrites,
-        'drag keeps each primary/secondary profession bar, rank and dropdown on untouched native layers')
-end
-check(above(crafting.RankBar,crafting) and crafting.RankBar.level==1, 'drag preserves the crafting page rank bar')
-HideUIPanel(ProfessionsFrame); drain(); ShowUIPanel(ProfessionsFrame)
-professions.handle.scripts.OnMouseDown()
-check(above(cards[1].StatusBar,cards[1]) and not ProfessionsFrame.strataWrites, 'reopen and title click retain native profession strata')
-page:SetFrameLevel(100) -- Blizzard can change page levels while switching tabs.
-W.Front(professions)
-check(above(cards[1].StatusBar,cards[1]) and cards[1].StatusBar.level==1, 'native tab-level changes do not require mover layer repair')
-W.Reset(professions)
-check(not ProfessionsFrame.strataWrites and not crafting.RankBar.strataWrites and cards[1].StatusBar.level==1,
-    'reset does not rewrite native profession drawing metadata')
-ProfessionsBookFrame=frame('ProfessionsBookFrame',UIParent)
-local standaloneContent=frame(nil,ProfessionsBookFrame); standaloneContent.level=100
-local standaloneBar=frame(nil,standaloneContent); standaloneBar.level=1; standaloneBar.strata='HIGH'
-W.Scan(); local standaloneBook=W.records.ProfessionsBookFrame
-W.Start(standaloneBook); W.Stop(standaloneBook)
-check(above(standaloneBar,standaloneContent) and standaloneBar.level==1, 'standalone profession book retains native bar layering')
-closeWindows()
-LFGParentFrame=frame('LFGParentFrame',UIParent)
-UIPanelWindows.LFGParentFrame={area='left'}
-local who=frame('LFGWhoListFrame',LFGParentFrame); who.level=100
-who.TitleContainer=frame(nil,who); who.TitleContainer.level=510
-local whoInset=frame(nil,who); whoInset.level=500
-local whoList=frame(nil,whoInset); whoList.level=501
-local whoEdit=frame('WhoFrameEditBox',who); whoEdit.strata='HIGH'; whoEdit.level=1
-local whoSearch=frame(nil,who); whoSearch.strata='HIGH'; whoSearch.level=2
-local whoTooltip=frame(nil,who); whoTooltip.strata='TOOLTIP'; whoTooltip.level=3
-local whoDialog=frame(nil,who); whoDialog.strata='DIALOG'; whoDialog.level=4
-local forbidden=frame(nil,who); forbidden.forbidden=true
-function forbidden:GetFrameStrata() error('must not inspect forbidden frame') end
-W.Scan(true); local lfg=W.records.LFGParentFrame
-check(lfg and not W.records.LFGWhoListFrame, 'Who tab remains part of the LFG owner')
-ShowUIPanel(LFGParentFrame); W.Start(lfg); W.Stop(lfg)
-check(above(whoEdit,whoInset) and above(whoSearch,whoInset) and above(whoList,whoInset),
-    'Who search and list stay above their background after dragging')
-check(whoTooltip.strata=='TOOLTIP' and whoTooltip.level==3 and whoDialog.strata=='DIALOG' and whoDialog.level==4,
-    'tooltips and dialogs retain native overlay layers')
-local lateRow=frame(nil,whoList); lateRow.level=whoList.level+1
-W.Front(lfg)
-check(above(lateRow,whoList) and above(whoEdit,lateRow), 'late Who rows inherit native list layers without a mover cache')
-HideUIPanel(LFGParentFrame); drain(); ShowUIPanel(LFGParentFrame)
-check(above(whoEdit,who.TitleContainer) and whoEdit.level==1 and not whoEdit.strataWrites,
-    'reopened Who search retains its native priority above title art')
-W.Reset(lfg)
-check(not whoEdit.strataWrites and not whoInset.strataWrites and whoEdit.level==1,
-    'Who reset leaves native drawing layers intact')
-do
-    local owner=frame('LayerAudit',UIParent)
-    local art=frame(nil,owner); art.level=510
-    local low=frame(nil,owner); low.strata='LOW'; low.level=900
-    local overlay=frame(nil,owner); overlay.strata='HIGH'; overlay.level=1
-    local detail=frame(nil,overlay); detail.strata='HIGH'; detail.level=5
-    local peer=frame(nil,overlay); peer.strata='HIGH'; peer.level=5
-    W.Attach(owner,true); local record=W.records[owner.name]
-    owner:Show(); W.Start(record); W.Stop(record)
-    W.Front(record); W.Front(record)
-    check(above(owner,low) and above(overlay,art) and above(detail,overlay) and peer.level==detail.level,
-        'mixed-layer controls and equal native levels survive repeated raises')
-    W.Reset(record)
-    check(low.strata=='LOW' and low.level==900 and overlay.strata=='HIGH' and overlay.level==1
-        and detail.level==5 and not overlay.strataWrites, 'other windows retain original low/high drawing metadata')
-    owner:Hide()
-end
-closeWindows()
-W.Reset(character)
-local lifecycle={closed=0,opened=0,childClosed=0,childOpened=0}
-local nativeClose=function() lifecycle.closed=lifecycle.closed+1 end
-local nativeOpen=function() lifecycle.opened=lifecycle.opened+1 end
-local nativeChildClose=function() lifecycle.childClosed=lifecycle.childClosed+1 end
-local nativeChildOpen=function() lifecycle.childOpened=lifecycle.childOpened+1 end
-ProfessionsFrame:SetScript('OnHide',nativeClose); ProfessionsFrame:SetScript('OnShow',nativeOpen)
-page:SetScript('OnHide',nativeChildClose); page:SetScript('OnShow',nativeChildOpen); page.shown=true
-ShowUIPanel(ProfessionsFrame)
-check(slots.left==ProfessionsFrame and not professions.detached, 'professions initially occupies native layout slot')
 W.Start(professions); ProfessionsFrame.left,ProfessionsFrame.top=1100,780; W.Stop(professions)
-check(professions.detached and ProfessionsFrame.shown and slots.left~=ProfessionsFrame and slots.center~=ProfessionsFrame,
-    'first drag releases native slot immediately while professions stays open')
-check(lifecycle.closed==0 and lifecycle.opened==1 and lifecycle.childClosed==0 and lifecycle.childOpened==1,
-    'slot release does not close or restart profession or child-page interactions')
-check(ProfessionsFrame:GetScript('OnHide')==nativeClose and ProfessionsFrame:GetScript('OnShow')==nativeOpen
-    and page:GetScript('OnHide')==nativeChildClose and page:GetScript('OnShow')==nativeChildOpen,
-    'all native lifecycle handlers are restored after synchronous handoff')
-ShowUIPanel(CharacterFrame)
-check(slots.left==CharacterFrame and CharacterFrame.points[1][4]==21 and ProfessionsFrame.shown,
-    'untouched character sheet opens at native left without reserving custom professions width')
-check(near(ProfessionsFrame.left,1100) and near(ProfessionsFrame.top,780) and above(cards[1].StatusBar,cards[1]),
-    'opening character sheet preserves profession position and native progress bar layers')
+check(nativeOpened==1 and professionClosed==0 and slots.left==ProfessionsFrame,
+    'first drag leaves native lifecycle and panel manager alone')
+check(bar.level==1 and bar.strata=='HIGH' and ProfessionsFrame.strata=='MEDIUM', 'progress bar retains native drawing priority after moving')
+W.Reset(character); ShowUIPanel(CharacterFrame)
+check(CharacterFrame.shown and slots.center==CharacterFrame, 'native panel manager still arranges untouched panels around open professions')
+HideUIPanel(CharacterFrame); ShowUIPanel(CharacterFrame)
+check(CharacterFrame.raised and professionClosed==0, 'reopening raises supported window without affecting professions interaction')
+W.Reset(professions)
+check(ProfessionsFrame.shown and professionClosed==0, 'reset does not synthesize native visibility changes')
 HideUIPanel(ProfessionsFrame)
-check(lifecycle.closed==1 and lifecycle.childClosed==1, 'real close still invokes restored native interaction cleanup')
-W.Reset(bank)
-local bankClosed=0
-BankFrame:SetScript('OnHide',function() bankClosed=bankClosed+1 end)
-ShowUIPanel(BankFrame)
-W.Start(bank); W.Stop(bank)
-check(bank.detached and BankFrame.shown and bankClosed==0,
-    'protected bank releases its slot out of combat without ending its NPC interaction')
-HideUIPanel(BankFrame)
-check(bankClosed==1, 'real bank close still runs its restored cleanup handler')
-local failed=frame('FailedReleasePanel',UIParent); UIPanelWindows.FailedReleasePanel={area='left'}
-failed:SetScript('OnHide',nativeClose); failed:SetScript('OnShow',nativeOpen)
-W.Attach(failed,true); ShowUIPanel(failed)
-local originalHide=HideUIPanel
-HideUIPanel=function(f,...) if f==failed then error('simulated panel API failure') end; return originalHide(f,...) end
-local failedRecord=W.records.FailedReleasePanel
-W.Start(failedRecord); W.Stop(failedRecord)
-HideUIPanel=originalHide
-check(failed.shown and not failedRecord.detaching and failed:GetScript('OnHide')==nativeClose
-    and failed:GetScript('OnShow')==nativeOpen, 'API failure restores handlers and clears handoff guard')
-HideUIPanel(failed); drain()
+check(professionClosed==1, 'real close still cleans up profession interaction')
 W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
 local persisted=ForeverQoLDB.windowPositions.CharacterFrame
--- Simulate fresh UI objects and module state using the existing saved variables.
-CharacterFrame=frame('CharacterFrame',UIParent)
+CharacterFrame=frame('CharacterFrame',UIParent); CharacterFrame.nativeOwned=true
 local F2={Print=function() end}
 assert(loadfile(root..'/addon/ForeverQoL/Windows.lua'))('ForeverQoL',F2)
 F2.Windows.Initialize()
-check(F2.Windows.records.CharacterFrame and near(CharacterFrame.left,420) and near(CharacterFrame.top,750), 'fresh session restores saved position on newly created window')
-check(ForeverQoLDB.windowPositions.CharacterFrame==persisted, 'restoring does not rewrite saved data')
-local originalShow,originalBagLayout=ShowUIPanel,UpdateContainerFrameAnchors
-local showHooks,bagHooks=globalHookCounts.ShowUIPanel,globalHookCounts.UpdateContainerFrameAnchors
-ShowUIPanel,UpdateContainerFrameAnchors=nil,nil
-local F3={Print=function() end}
-assert(loadfile(root..'/addon/ForeverQoL/Windows.lua'))('ForeverQoL',F3)
-F3.Windows.InstallHooks()
-check(globalHookCounts.ShowUIPanel==showHooks and globalHookCounts.UpdateContainerFrameAnchors==bagHooks, 'missing load-on-demand APIs are not hooked prematurely')
-ShowUIPanel,UpdateContainerFrameAnchors=originalShow,originalBagLayout
-F3.Windows.InstallHooks(); F3.Windows.InstallHooks()
-check(globalHookCounts.ShowUIPanel==showHooks+1 and globalHookCounts.UpdateContainerFrameAnchors==bagHooks+1, 'late API registration retries once without duplicate hooks')
+check(F2.Windows.records.CharacterFrame and near(CharacterFrame.left,420) and near(CharacterFrame.top,750), 'fresh session restores saved positions')
+check(ForeverQoLDB.windowPositions.CharacterFrame==persisted, 'restore does not rewrite saved variables')
 print(string.format('Passed %d movable-window checks.',checks))

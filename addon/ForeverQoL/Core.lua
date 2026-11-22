@@ -6,7 +6,12 @@ function F.Print(message)
 end
 SLASH_FOREVERQOL1 = "/fql"
 SLASH_FOREVERQOL2 = "/foreverqol"
-SlashCmdList.FOREVERQOL = function()
+local blockedCount, lastBlocked = 0, nil
+SlashCmdList.FOREVERQOL = function(command)
+    if command == 'errors' then
+        F.Print('Blocked actions since reload: ' .. blockedCount .. (lastBlocked and ('; last: ' .. lastBlocked) or ''))
+        return
+    end
     F.Print(F.version .. " — bank transfers, quest-item markers and movable windows enabled. Drag a window title; right-click it to reset.")
 end
 local events = CreateFrame("Frame")
@@ -17,8 +22,12 @@ events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("CURSOR_CHANGED")
 events:RegisterEvent("BANK_TABS_CHANGED")
-events:SetScript("OnEvent", function(_, event, name)
-    if event == "ADDON_LOADED" then
+events:RegisterEvent("ADDON_ACTION_BLOCKED")
+events:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+events:SetScript("OnEvent", function(_, event, name, action)
+    if event == 'ADDON_ACTION_BLOCKED' or event == 'ADDON_ACTION_FORBIDDEN' then
+        if name == addonName then blockedCount, lastBlocked = blockedCount + 1, tostring(action) end
+    elseif event == "ADDON_LOADED" then
         if name == addonName then
             F.InitializeDB()
             F.QuestItems.Initialize()

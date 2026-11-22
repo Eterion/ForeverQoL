@@ -343,6 +343,13 @@ F.RefreshControls()
 check(summaries == 0, 'closed bank does not rebuild filter display on cursor events')
 open = true
 F.FilterSummary = originalSummary
+local originalBodyHeight,originalOuterHeight=BankFrame.BankPanel.height,BankFrame.height
+BankFrame.BankPanel.height=900
+combat=true
+F.LayoutBankControls()
+check(BankFrame.height==originalOuterHeight, 'native bank layout is not changed during combat')
+combat=false
+BankFrame.BankPanel.height=originalBodyHeight
 
 C_AddOns = {GetAddOnMetadata = function() return '0.1.0' end}
 F.QuestItems = {Initialize = function() end}
@@ -351,4 +358,15 @@ SlashCmdList = {}
 assert(loadfile(root .. '/addon/ForeverQoL/Core.lua'))('ForeverQoL', F)
 check(F.version == '0.1.0' and type(SlashCmdList.FOREVERQOL) == 'function', 'public version and slash command')
 check(type(eventFrame.scripts.OnEvent) == 'function', 'event dispatcher loads')
+local savedPrint,lastMessage=print,nil
+print=function(message) lastMessage=message end
+eventFrame.scripts.OnEvent(nil,'ADDON_ACTION_BLOCKED','OtherAddon','OtherAction()')
+SlashCmdList.FOREVERQOL('errors')
+check(lastMessage:find('Blocked actions since reload: 0',1,true), 'diagnostics ignore errors attributed to another addon')
+eventFrame.scripts.OnEvent(nil,'ADDON_ACTION_BLOCKED','ForeverQoL','ActionBar:Hide()')
+eventFrame.scripts.OnEvent(nil,'ADDON_ACTION_FORBIDDEN','ForeverQoL','ActionBar:SetAttribute()')
+SlashCmdList.FOREVERQOL('errors')
+check(lastMessage:find('Blocked actions since reload: 2',1,true) and lastMessage:find('ActionBar:SetAttribute()',1,true),
+    'read-only diagnostics report count and exact last blocked function')
+print=savedPrint
 print(string.format('Passed %d ForeverQoL regression checks.', checks))
