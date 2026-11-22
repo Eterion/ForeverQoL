@@ -7,9 +7,17 @@ C_Timer = {After = function(_, fn) timers[#timers + 1] = fn end}
 local function drain() while #timers > 0 do table.remove(timers, 1)() end end
 local function frame(name, parent, width, height)
     local f = {name=name, parent=parent, width=width or 400, height=height or 400,
-        points={}, attrs={}, scripts={}, level=10, scale=1, strata='MEDIUM', shown=false, left=16, top=900, protected=false}
+        points={}, attrs={}, scripts={}, hooks={}, level=10, scale=1, strata='MEDIUM', shown=false, left=16, top=900, protected=false}
     allFrames[#allFrames + 1] = f
     local function mutate(self) assert(not combat or not self.protected, 'protected mutation during combat') end
+    local function run(self,event)
+        if self.scripts[event] then self.scripts[event](self) end
+        for _,callback in ipairs(self.hooks[event] or {}) do callback(self) end
+    end
+    local function visibility(self,event)
+        run(self,event)
+        for _,child in ipairs({self:GetChildren()}) do if child.shown then visibility(child,event) end end
+    end
     function f:GetName() return self.name end
     function f:GetParent() return self.parent end
     function f:GetChildren()
@@ -35,7 +43,7 @@ local function frame(name, parent, width, height)
     function f:GetFrameStrata() return self.strata end
     function f:SetFrameStrata(value) mutate(self); self.strata=value; self.strataWrites=(self.strataWrites or 0)+1 end
     function f:SetHeight(value) self.height=value end
-    function f:SetWidth(value) self.width=value; if self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self) end end
+    function f:SetWidth(value) self.width=value; run(self,'OnSizeChanged') end
     function f:GetNumPoints() return #self.points end
     function f:GetPoint(index) return unpack(self.points[index or 1]) end
     function f:ClearAllPoints() mutate(self); self.points={} end
@@ -48,8 +56,8 @@ local function frame(name, parent, width, height)
     function f:IsProtected() return self.protected end
     function f:IsToplevel() return self.parent==UIParent end
     function f:IsShown() return self.shown end
-    function f:Show() self.shown=true; if self.scripts.OnShow then self.scripts.OnShow(self) end end
-    function f:Hide() self.shown=false; if self.scripts.OnHide then self.scripts.OnHide(self) end end
+    function f:Show() if self.shown then return end; self.shown=true; visibility(self,'OnShow') end
+    function f:Hide() if not self.shown then return end; self.shown=false; visibility(self,'OnHide') end
     function f:SetMovable(value) mutate(self); self.movable=value end
     function f:SetClampedToScreen(value) mutate(self); self.clamped=value end
     function f:SetUserPlaced(value) mutate(self); self.userPlaced=value end
@@ -68,9 +76,10 @@ local function frame(name, parent, width, height)
     function f:RegisterForClicks(...) self.clickButtons={...} end
     function f:RegisterEvent() end
     function f:SetScript(event, callback) self.scripts[event]=callback; if event=='OnEvent' then eventHandler=callback end end
+    function f:GetScript(event) return self.scripts[event] end
     function f:HookScript(event, callback)
-        local old=self.scripts[event]
-        self.scripts[event]=function(...) if old then old(...) end; callback(...) end
+        self.hooks[event]=self.hooks[event] or {}
+        self.hooks[event][#self.hooks[event]+1]=callback
     end
     return f
 end
@@ -456,6 +465,52 @@ do
         and detail.level==5 and not overlay.strataWrites, 'other windows retain original low/high drawing metadata')
     owner:Hide()
 end
+closeWindows()
+W.Reset(character)
+local lifecycle={closed=0,opened=0,childClosed=0,childOpened=0}
+local nativeClose=function() lifecycle.closed=lifecycle.closed+1 end
+local nativeOpen=function() lifecycle.opened=lifecycle.opened+1 end
+local nativeChildClose=function() lifecycle.childClosed=lifecycle.childClosed+1 end
+local nativeChildOpen=function() lifecycle.childOpened=lifecycle.childOpened+1 end
+ProfessionsFrame:SetScript('OnHide',nativeClose); ProfessionsFrame:SetScript('OnShow',nativeOpen)
+page:SetScript('OnHide',nativeChildClose); page:SetScript('OnShow',nativeChildOpen); page.shown=true
+ShowUIPanel(ProfessionsFrame)
+check(slots.left==ProfessionsFrame and not professions.detached, 'professions initially occupies native layout slot')
+W.Start(professions); ProfessionsFrame.left,ProfessionsFrame.top=1100,780; W.Stop(professions)
+check(professions.detached and ProfessionsFrame.shown and slots.left~=ProfessionsFrame and slots.center~=ProfessionsFrame,
+    'first drag releases native slot immediately while professions stays open')
+check(lifecycle.closed==0 and lifecycle.opened==1 and lifecycle.childClosed==0 and lifecycle.childOpened==1,
+    'slot release does not close or restart profession or child-page interactions')
+check(ProfessionsFrame:GetScript('OnHide')==nativeClose and ProfessionsFrame:GetScript('OnShow')==nativeOpen
+    and page:GetScript('OnHide')==nativeChildClose and page:GetScript('OnShow')==nativeChildOpen,
+    'all native lifecycle handlers are restored after synchronous handoff')
+ShowUIPanel(CharacterFrame)
+check(slots.left==CharacterFrame and CharacterFrame.points[1][4]==21 and ProfessionsFrame.shown,
+    'untouched character sheet opens at native left without reserving custom professions width')
+check(near(ProfessionsFrame.left,1100) and near(ProfessionsFrame.top,780) and above(cards[1].StatusBar,cards[1]),
+    'opening character sheet preserves profession position and native progress bar layers')
+HideUIPanel(ProfessionsFrame)
+check(lifecycle.closed==1 and lifecycle.childClosed==1, 'real close still invokes restored native interaction cleanup')
+W.Reset(bank)
+local bankClosed=0
+BankFrame:SetScript('OnHide',function() bankClosed=bankClosed+1 end)
+ShowUIPanel(BankFrame)
+W.Start(bank); W.Stop(bank)
+check(bank.detached and BankFrame.shown and bankClosed==0,
+    'protected bank releases its slot out of combat without ending its NPC interaction')
+HideUIPanel(BankFrame)
+check(bankClosed==1, 'real bank close still runs its restored cleanup handler')
+local failed=frame('FailedReleasePanel',UIParent); UIPanelWindows.FailedReleasePanel={area='left'}
+failed:SetScript('OnHide',nativeClose); failed:SetScript('OnShow',nativeOpen)
+W.Attach(failed,true); ShowUIPanel(failed)
+local originalHide=HideUIPanel
+HideUIPanel=function(f,...) if f==failed then error('simulated panel API failure') end; return originalHide(f,...) end
+local failedRecord=W.records.FailedReleasePanel
+W.Start(failedRecord); W.Stop(failedRecord)
+HideUIPanel=originalHide
+check(failed.shown and not failedRecord.detaching and failed:GetScript('OnHide')==nativeClose
+    and failed:GetScript('OnShow')==nativeOpen, 'API failure restores handlers and clears handoff guard')
+HideUIPanel(failed); drain()
 W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
 local persisted=ForeverQoLDB.windowPositions.CharacterFrame
 -- Simulate fresh UI objects and module state using the existing saved variables.

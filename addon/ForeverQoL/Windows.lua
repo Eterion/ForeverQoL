@@ -47,7 +47,40 @@ local function Managed(frame)
     return false
 end
 
-local function Detach(record)
+local function ReleasePanel(record)
+    local frame, scripts = record.frame, {}
+    -- The public panel API removes the secure slot by hiding the frame.
+    -- Preserve its live interaction during this synchronous hide/show: native
+    -- OnHide handlers otherwise close banks, trade skills, merchants, etc.
+    local function Collect(widget)
+        if widget.IsForbidden and widget:IsForbidden() then return false end
+        for _, event in ipairs({'OnHide', 'OnShow'}) do
+            local handler = widget:GetScript(event)
+            if handler then scripts[#scripts + 1] = {frame=widget, event=event, handler=handler} end
+        end
+        for _, child in ipairs({widget:GetChildren()}) do if not Collect(child) then return false end end
+        return true
+    end
+    if not Collect(frame) then return false end
+    record.detaching = true
+    local ok, message = pcall(function()
+        for _, script in ipairs(scripts) do script.frame:SetScript(script.event, nil) end
+        HideUIPanel(frame)
+        if not Managed(frame) then frame:SetAttributeNoHandler('UIPanelLayout-area', nil) end
+    end)
+    -- No rendered frame elapses while the window is hidden. Show it while its
+    -- lifecycle handlers are still suspended, then restore every handler.
+    local shown, showMessage = pcall(function()
+        if not frame:IsShown() then ShowUIPanel(frame) end
+        if not frame:IsShown() then frame:Show() end
+    end)
+    for _, script in ipairs(scripts) do script.frame:SetScript(script.event, script.handler) end
+    record.detaching = nil
+    if not ok or not shown then F.Print('Could not release window layout: ' .. tostring(message or showMessage)) end
+    return ok and shown and frame:IsShown() and not Managed(frame)
+end
+
+local function Detach(record, releaseLive)
     local frame = record.frame
     if not record.panel then return true end
     if record.detached then
@@ -55,7 +88,7 @@ local function Detach(record)
         if Allowed(frame) then frame:SetAttributeNoHandler('UIPanelLayout-area', nil) end
         return true
     end
-    if not Allowed(frame) or Managed(frame) then return false end
+    if not Allowed(frame) then return false end
     -- Preserve native metadata and show/hide functions. An empty area makes
     -- Forever's ShowUIPanel/HideUIPanel use their ordinary floating-frame path.
     if not frame:GetAttribute('UIPanelLayout-defined') then
@@ -63,6 +96,7 @@ local function Detach(record)
         frame:SetAttributeNoHandler('UIPanelLayout-defined', true)
     end
     record.nativeArea = frame:GetAttribute('UIPanelLayout-area') or record.nativeArea or record.panel.area
+    if Managed(frame) and (not releaseLive or not ReleasePanel(record)) then return false end
     frame:SetAttributeNoHandler('UIPanelLayout-area', nil)
     record.detached = true
     local found
@@ -107,7 +141,7 @@ function W.Front(record)
 end
 
 function W.Apply(record)
-    if not positions or record.applying or record.moving or not Allowed(record.frame) then return end
+    if not positions or record.applying or record.moving or record.detaching or not Allowed(record.frame) then return end
     local position = positions[record.name]
     if not position then return end
     if type(position) ~= 'table' or not Finite(position.x) or not Finite(position.y) then
@@ -129,7 +163,7 @@ function W.Apply(record)
 end
 
 function W.Stop(record)
-    if not record or not record.moving then return end
+    if not record or not record.moving or record.detaching then return end
     local frame = record.frame
     if InCombatLockdown() and frame:IsProtected() then record.pendingStop = true; return end
     frame:StopMovingOrSizing()
@@ -140,6 +174,7 @@ function W.Stop(record)
         positions[record.name] = {x = left * scale / width, y = top * scale / height}
     end
     frame:SetUserPlaced(false) -- SavedVariables own persistence, not layout-cache.txt.
+    if positions[record.name] then Detach(record, true) end
     W.Apply(record)
 end
 
@@ -233,7 +268,7 @@ function W.Attach(frame, explicit)
     end)
     handle:SetScript('OnClick', function(self, button) if button == 'RightButton' then Menu(record, self) end end)
     frame:HookScript('OnShow', function()
-        if not Allowed(frame) then return end
+        if record.detaching or not Allowed(frame) then return end
         if not positions[name] and not record.panel and frame:GetNumPoints() == 0 then
             record.applying = true; Default(record); record.applying = nil
         end
@@ -241,6 +276,7 @@ function W.Attach(frame, explicit)
         W.Front(record)
     end)
     frame:HookScript('OnHide', function()
+        if record.detaching then return end
         W.Stop(record)
         if positions[name] and not record.detached then C_Timer.After(0, function()
             if positions[name] then Detach(record) end

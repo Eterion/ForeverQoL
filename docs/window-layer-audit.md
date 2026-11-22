@@ -25,6 +25,12 @@ Reviewed the current [BlizzMove movement code](https://github.com/Kiatra/BlizzMo
 
 ForeverQoL now leaves the native drawing hierarchy in place too. Reopening or dragging calls native `Raise()` on the window. There is no descendant scan, cache, sort or rewrite for stacking. The addon's transparent title handle still sets its own level. Position persistence, floating panel layout and native reset are unchanged.
 
+## First-drag layout handoff
+
+When the first drag finishes, release the panel's native slot through public `HideUIPanel`, clear its native area, and show it through the floating `ShowUIPanel` path in the same synchronous call. Temporarily suspend the window/subtree's base OnHide/OnShow scripts so the handoff does not close a profession or NPC interaction, then restore the exact handler functions. The mover guards its own persistent hooks during this handoff. No render interval elapses between hide and show. This uses public APIs rather than accessing the forbidden frame-position delegate. Native panels left open are relaid out normally.
+
+The subtree is inspected only for this initial handoff, not on every raise. Forbidden subtrees keep the previous deferred-release fallback. Combat restrictions still apply. Other addons' hooks and protected-client behavior need live testing. Regression cases cover professions then untouched Character, child lifecycle handlers, a protected bank outside combat, genuine closes after handoff and restoration following an API error.
+
 Native `Raise()` operates within a strata, so a higher-strata window can remain above a lower-strata window opened later. Strict last-opened ordering across different native strata is not supported by this implementation. That earlier requirement remains a limitation rather than being simulated by rewriting child layers.
 
 ## Verification boundary
