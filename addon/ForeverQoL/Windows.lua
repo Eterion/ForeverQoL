@@ -1,7 +1,13 @@
 local _, F = ...
 local W = { records = {} }
 F.Windows = W
-local positions, activeDrag, scanQueued, scanning, panelHooked, bagsHooked
+local positions, activeDrag, scanQueued, scanning, panelHooked, bagsHooked, attributeHooked
+local interactions = {
+    BankFrame=true, MerchantFrame=true, MailFrame=true, OpenMailFrame=true,
+    TradeFrame=true, QuestFrame=true, GossipFrame=true, ClassTrainerFrame=true,
+    TrainerFrame=true, AuctionFrame=true, AuctionHouseFrame=true, PetStableFrame=true,
+    StableFrame=true, VoidStorageFrame=true,
+}
 local names = {
     'CharacterFrame', 'PlayerSpellsFrame', 'SpellBookFrame', 'WorldMapFrame',
     'QuestLogFrame', 'QuestFrame', 'GossipFrame', 'MerchantFrame', 'BankFrame',
@@ -43,7 +49,12 @@ end
 
 local function Detach(record)
     local frame = record.frame
-    if record.detached or not record.panel then return true end
+    if not record.panel then return true end
+    if record.detached then
+        -- Native mode changes can update the area while combat defers us.
+        if Allowed(frame) then frame:SetAttributeNoHandler('UIPanelLayout-area', nil) end
+        return true
+    end
     if not Allowed(frame) or Managed(frame) then return false end
     -- Preserve native metadata and show/hide functions. An empty area makes
     -- Forever's ShowUIPanel/HideUIPanel use their ordinary floating-frame path.
@@ -51,26 +62,18 @@ local function Detach(record)
         for key, value in pairs(record.panel) do frame:SetAttributeNoHandler('UIPanelLayout-' .. key, value) end
         frame:SetAttributeNoHandler('UIPanelLayout-defined', true)
     end
+    record.nativeArea = frame:GetAttribute('UIPanelLayout-area') or record.nativeArea or record.panel.area
     frame:SetAttributeNoHandler('UIPanelLayout-area', nil)
     record.detached = true
+    local found
+    for _, special in ipairs(UISpecialFrames) do if special == record.name then found = true; break end end
+    if not found then UISpecialFrames[#UISpecialFrames + 1] = record.name; record.escapeAdded = true end
     return true
 end
 
 local function Default(record)
-    local frame, panel = record.frame, record.panel
-    if panel then
-        local scale = frame:GetScale()
-        local top = GetUIPanelLayoutAttribute and GetUIPanelLayoutAttribute('TOP_OFFSET') or -116
-        local left = GetUIPanelLayoutAttribute and GetUIPanelLayoutAttribute('LEFT_OFFSET') or 16
-        local y = (panel.yoffset or 0) + top
-        if ClampUIPanelY then y = ClampUIPanelY(frame, y, panel.minYOffset, panel.bottomClampOverride) end
-        frame:ClearAllPoints()
-        if panel.area == 'center' or panel.area == 'centerOrLeft' then
-            frame:SetPoint('TOP', UIParent, 'TOP', panel.centerXOffset or 0, y / scale)
-        else
-            frame:SetPoint('TOPLEFT', UIParent, 'TOPLEFT', (left + (panel.xoffset or 0)) / scale, y / scale)
-        end
-    elseif #record.defaults > 0 then
+    local frame = record.frame
+    if #record.defaults > 0 then
         frame:ClearAllPoints()
         for _, point in ipairs(record.defaults) do frame:SetPoint(unpack(point)) end
     else
@@ -80,15 +83,38 @@ local function Default(record)
     frame:SetUserPlaced(false)
 end
 
+local function RestoreNative(record)
+    if record.detached then
+        record.frame:SetAttributeNoHandler('UIPanelLayout-area', record.nativeArea or record.panel.area)
+        record.detached = nil
+    end
+    if record.escapeAdded then
+        for index = #UISpecialFrames, 1, -1 do
+            if UISpecialFrames[index] == record.name then table.remove(UISpecialFrames, index) end
+        end
+        record.escapeAdded = nil
+    end
+    record.frame:SetFrameStrata(record.nativeStrata)
+end
+
+function W.Front(record)
+    if not positions[record.name] or not Allowed(record.frame) or not record.frame:IsShown() then return end
+    -- Raise alone cannot cross strata (the map and character sheet differ).
+    -- Keep custom windows together, then let the engine raise the whole family.
+    record.frame:SetFrameStrata('HIGH')
+    record.frame:Raise()
+end
+
 function W.Apply(record)
     if not positions or record.applying or record.moving or not Allowed(record.frame) then return end
-    Detach(record)
     local position = positions[record.name]
     if not position then return end
     if type(position) ~= 'table' or not Finite(position.x) or not Finite(position.y) then
         positions[record.name] = nil
+        RestoreNative(record)
         return
     end
+    Detach(record)
     local frame, width, height = record.frame, UIParent:GetWidth(), UIParent:GetHeight()
     local scale = Scale(frame)
     if width <= 0 or height <= 0 or scale <= 0 then return end
@@ -124,6 +150,7 @@ function W.Start(record)
     if activeDrag then W.Stop(activeDrag) end
     local frame = record.frame
     record.moving, activeDrag = true, record
+    frame:SetFrameStrata('HIGH')
     frame:Raise()
     frame:StartMoving()
 end
@@ -133,9 +160,22 @@ function W.Reset(record)
     W.Stop(record)
     positions[record.name] = nil
     record.applying = true
+    RestoreNative(record)
     if record.bag and UpdateContainerFrameAnchors then
         record.frame:SetUserPlaced(false)
         UpdateContainerFrameAnchors()
+    elseif record.panel then
+        record.frame:SetUserPlaced(false)
+        if Managed(record.frame) then
+            UpdateUIPanelPositions(record.frame)
+        elseif record.frame:IsShown() then
+            -- Re-enter the real panel manager so its current width, area,
+            -- minimize offsets, and other open panels determine placement.
+            HideUIPanel(record.frame, true)
+            -- NPC windows own a server interaction; do not resurrect a closed
+            -- bank/merchant/etc. Reopening the interaction uses native layout.
+            if not interactions[record.name] then ShowUIPanel(record.frame) end
+        end
     else
         Default(record)
     end
@@ -163,17 +203,12 @@ function W.Attach(frame, explicit)
     end
     if InCombatLockdown() then return end -- Retry registration after combat.
     local record = {name = name, frame = frame, defaults = CapturePoints(frame), panel = panel,
+        nativeStrata = frame:GetFrameStrata(),
         bag = name:match('^ContainerFrame') ~= nil}
     W.records[name] = record
     frame:SetMovable(true)
     frame:SetClampedToScreen(true)
     if frame.SetDontSavePosition then frame:SetDontSavePosition(true) end
-    Detach(record)
-    if panel then
-        local found
-        for _, special in ipairs(UISpecialFrames) do if special == name then found = true; break end end
-        if not found then UISpecialFrames[#UISpecialFrames + 1] = name end
-    end
     local handle = CreateFrame('Button', nil, frame)
     record.handle = handle
     -- Only cover the title text. Leave portraits and close/maximize buttons free.
@@ -196,15 +231,19 @@ function W.Attach(frame, explicit)
     handle:SetScript('OnClick', function(self, button) if button == 'RightButton' then Menu(record, self) end end)
     frame:HookScript('OnShow', function()
         if not Allowed(frame) then return end
-        if not positions[name] and frame:GetNumPoints() == 0 then
+        if not positions[name] and not record.panel and frame:GetNumPoints() == 0 then
             record.applying = true; Default(record); record.applying = nil
         end
         W.Apply(record)
+        W.Front(record)
     end)
     frame:HookScript('OnHide', function()
         W.Stop(record)
-        if not record.detached then C_Timer.After(0, function() Detach(record) end) end
+        if positions[name] and not record.detached then C_Timer.After(0, function()
+            if positions[name] then Detach(record) end
+        end) end
     end)
+    frame:HookScript('OnSizeChanged', function() W.Apply(record) end)
     hooksecurefunc(frame, 'SetPoint', function() if not record.bag then W.Apply(record) end end)
     W.Apply(record)
 end
@@ -266,6 +305,18 @@ function W.InstallHooks()
         bagsHooked = true
         hooksecurefunc('UpdateContainerFrameAnchors', function()
             for _, record in pairs(W.records) do if record.bag then W.Apply(record) end end
+        end)
+    end
+    if not attributeHooked and SetUIPanelAttribute then
+        attributeHooked = true
+        hooksecurefunc('SetUIPanelAttribute', function(frame, key, value)
+            local record = frame and W.records[frame:GetName()]
+            if record and key == 'area' and value ~= nil then
+                record.nativeArea = value
+                if record.detached and positions[record.name] and Allowed(frame) then
+                    frame:SetAttributeNoHandler('UIPanelLayout-area', nil)
+                end
+            end
         end)
     end
 end

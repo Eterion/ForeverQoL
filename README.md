@@ -27,7 +27,7 @@ Completed uses can be recognized immediately after installation. Quest removal i
 
 ## Movable windows
 
-Left-drag a window's title to move it. Positions are shared across characters and saved across closing, `/reload`, logout and game restarts. Right-click the title and choose **Reset to default** to clear that window's saved position. The reset keeps floating/overlap behaviour enabled. Clicking or dragging a title brings that window forward.
+Left-drag a window's title to move it. Positions are shared across characters and saved across closing, `/reload`, logout and game restarts. Custom-positioned windows overlap, and reopening or dragging one brings it forward. Right-click the title and choose **Reset to default** to clear that window's saved position and return it to Blizzard's layout management. Default windows use the available space and close other panels when required by Blizzard's normal rules. Reset respects the window's current compact/expanded mode. Resetting a floating NPC interaction window closes it; reopening the interaction uses the default layout.
 
 Supported Blizzard panels float independently instead of being pushed aside or closed by the automatic left/center/right panel layout. Coverage includes character, spells, quests, bank, merchant, mail, trade, auction, professions, social, collections and other loaded panels, plus individual/combined bags. Additional named top-level windows with standard title fields are discovered as UI addons load. The title handles have no artwork and leave close/maximize buttons and window contents available.
 
@@ -53,7 +53,7 @@ Offline tests cover filtering, deposit/withdraw routing, bag coverage, account-b
 
 Quest-item tests cover generated-data integrity, completion and abandonment reasons, shared/future/repeatable uses, native active-use safeguards, missing data, recycled slots, tooltip output, character separation and event races. Live verification remains necessary for marker positioning, tooltip integration, turn-in/abandon/reaccept refreshes and client quest-history behavior.
 
-Movable-window tests cover normal left dragging, persistent positions on fresh UI objects, title reset menus, overlapping managed panels, original defaults, scale/resolution changes, clamping, invalid saved data, late window discovery, bag layout, Escape registration and combat-deferred operations. Live testing remains necessary for each client's protected-panel behaviour, unusual custom title bars, NPC interactions and windows controlled by other movers.
+Movable-window tests cover normal left dragging, persistent positions on fresh UI objects, title reset menus, compact/expanded spellbook metadata, native panel placement and eviction after reset, reopening order across frame strata, overlapping managed panels, original defaults, scale/resolution changes, clamping, invalid saved data, late window discovery, bag layout, Escape registration and combat-deferred operations. Live testing remains necessary for each client's protected-panel behaviour, unusual custom title bars, NPC interactions and windows controlled by other movers.
 
 ## Performance checks
 

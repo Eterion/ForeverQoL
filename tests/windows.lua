@@ -1,5 +1,5 @@
 local root = assert(arg[1])
-local checks, combat, timers, eventHandler, allFrames = 0, false, {}, nil, {}
+local checks, combat, timers, eventHandler, allFrames, raiseOrder = 0, false, {}, nil, {}, 0
 local function check(value, message) checks = checks + 1; assert(value, message) end
 local function near(a, b) return math.abs(a - b) < 0.001 end
 InCombatLockdown = function() return combat end
@@ -7,7 +7,7 @@ C_Timer = {After = function(_, fn) timers[#timers + 1] = fn end}
 local function drain() while #timers > 0 do table.remove(timers, 1)() end end
 local function frame(name, parent, width, height)
     local f = {name=name, parent=parent, width=width or 400, height=height or 400,
-        points={}, attrs={}, scripts={}, level=10, scale=1, shown=false, left=16, top=900, protected=false}
+        points={}, attrs={}, scripts={}, level=10, scale=1, strata='MEDIUM', shown=false, left=16, top=900, protected=false}
     allFrames[#allFrames + 1] = f
     local function mutate(self) assert(not combat or not self.protected, 'protected mutation during combat') end
     function f:GetName() return self.name end
@@ -20,7 +20,10 @@ local function frame(name, parent, width, height)
     function f:GetTop() return self.top end
     function f:GetFrameLevel() return self.level end
     function f:SetFrameLevel(level) self.level=level end
+    function f:GetFrameStrata() return self.strata end
+    function f:SetFrameStrata(value) mutate(self); self.strata=value end
     function f:SetHeight(value) self.height=value end
+    function f:SetWidth(value) self.width=value; if self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self) end end
     function f:GetNumPoints() return #self.points end
     function f:GetPoint(index) return unpack(self.points[index or 1]) end
     function f:ClearAllPoints() mutate(self); self.points={} end
@@ -41,7 +44,7 @@ local function frame(name, parent, width, height)
     function f:SetDontSavePosition(value) mutate(self); self.dontSave=value end
     function f:StartMoving() mutate(self); self.dragging=true end
     function f:StopMovingOrSizing() mutate(self); self.dragging=false; self.stops=(self.stops or 0)+1 end
-    function f:Raise() mutate(self); self.raised=(self.raised or 0)+1 end
+    function f:Raise() mutate(self); self.raised=(self.raised or 0)+1; raiseOrder=raiseOrder+1; self.order=raiseOrder end
     function f:GetAttribute(key) return self.attrs[key] end
     function f:SetAttributeNoHandler(key, value) mutate(self); self.attrs[key]=value end
     function f:RegisterForDrag(...) self.dragButtons={...} end
@@ -67,14 +70,62 @@ UISpecialFrames={}
 GetUIPanel=function(slot) return slots[slot] end
 GetUIPanelLayoutAttribute=function(key) return key=='TOP_OFFSET' and -100 or 16 end
 ClampUIPanelY=function(_,y) return y end
-ShowUIPanel=function(f)
+local function areaOf(f)
     local area=f.attrs['UIPanelLayout-defined'] and f.attrs['UIPanelLayout-area'] or nil
     if not f.attrs['UIPanelLayout-defined'] then area=UIPanelWindows[f.name] and UIPanelWindows[f.name].area end
+    return area
+end
+local function layout()
+    local x=16
+    for _, key in ipairs({'left','center','right'}) do
+        local f=slots[key]
+        if f then
+            f:ClearAllPoints()
+            if areaOf(f)=='center' or (areaOf(f)=='centerOrLeft' and key=='center' and not slots.left) then
+                f:SetPoint('TOP',UIParent,'TOP',f.attrs['UIPanelLayout-centerXOffset'] or 0,-100)
+            else
+                local offset=UIPanelWindows[f.name].xoffset or 0
+                f:SetPoint('TOPLEFT',UIParent,'TOPLEFT',x+offset,-100)
+            end
+            x=x+f.width+20
+        end
+    end
+end
+UpdateUIPanelPositions=function() layout() end
+HideUIPanel=function(f)
+    for key,value in pairs(slots) do if value==f then slots[key]=nil end end
+    f:Hide()
+    layout()
+end
+ShowUIPanel=function(f)
+    if not f or f.shown then return end
+    for key,value in pairs(slots) do if not value.shown then slots[key]=nil end end
+    local area=areaOf(f)
     if area then
-        if slots[area] then slots[area]:Hide() end
-        slots[area]=f
+        if not f.attrs['UIPanelLayout-defined'] then
+            for key,value in pairs(UIPanelWindows[f.name]) do f.attrs['UIPanelLayout-'..key]=value end
+            f.attrs['UIPanelLayout-defined']=true
+        end
+        local count,total=0,0
+        for _,value in pairs(slots) do count=count+1; total=total+value.width+20 end
+        if area=='center' or total+f.width+20>UIParent.width or count>=3 then
+            local old={}; for _,value in pairs(slots) do old[#old+1]=value end
+            for _,value in ipairs(old) do HideUIPanel(value) end
+            slots[area=='center' and 'center' or 'left']=f
+        elseif area=='centerOrLeft' and count==0 then slots.center=f
+        else
+            for _,key in ipairs({'left','center','right'}) do if not slots[key] then slots[key]=f; break end end
+        end
+        layout()
     end
     f:Show()
+end
+SetUIPanelAttribute=function(f,key,value)
+    if not f.attrs['UIPanelLayout-defined'] then
+        for k,v in pairs(UIPanelWindows[f.name]) do f.attrs['UIPanelLayout-'..k]=v end
+        f.attrs['UIPanelLayout-defined']=true
+    end
+    f:SetAttributeNoHandler('UIPanelLayout-'..key,value)
 end
 local bagLayouts=0
 UpdateContainerFrameAnchors=function()
@@ -116,11 +167,11 @@ check(character and merchant and bank, 'registers ordinary Blizzard windows')
 check(character.handle.parent==CharacterFrame and character.handle.height==20 and character.handle.level==511, 'transparent title-only handle above native title')
 check(character.handle.points[2][4]==-44, 'title handle leaves close and maximize controls unobstructed')
 check(character.handle.dragButtons[1]=='LeftButton', 'drag uses ordinary left button without modifiers')
-check(CharacterFrame.attrs['UIPanelLayout-area']==nil and CharacterFrame.attrs['UIPanelLayout-defined'], 'detaches native panel arrangement')
-check(UIPanelWindows.CharacterFrame.area=='left' and CharacterFrame.attrs['UIPanelLayout-xoffset']==5, 'preserves native metadata without changing registry')
-check(#UISpecialFrames==3, 'floating panels retain Escape closing registration')
+check(not character.detached and not CharacterFrame.attrs['UIPanelLayout-defined'], 'unmoved windows retain native panel arrangement')
+check(UIPanelWindows.CharacterFrame.area=='left', 'preserves native registry')
+check(#UISpecialFrames==0, 'default panels do not get addon Escape registrations')
 ShowUIPanel(CharacterFrame); ShowUIPanel(MerchantFrame); ShowUIPanel(BankFrame)
-check(CharacterFrame.shown and MerchantFrame.shown and BankFrame.shown, 'opening panels permits overlap instead of hiding previous panels')
+check(CharacterFrame.shown and MerchantFrame.shown and BankFrame.shown and slots.left==CharacterFrame, 'default windows are laid out by native panel manager')
 check(CharacterFrame.points[1][4]==21 and CharacterFrame.points[1][5]==-100, 'unanchored panel gets native default offsets')
 character.handle.scripts.OnDragStart()
 check(CharacterFrame.dragging and character.moving and CharacterFrame.raised>0, 'title drag starts movement and raises window')
@@ -129,15 +180,17 @@ character.handle.scripts.OnDragStop()
 local saved=ForeverQoLDB.windowPositions.CharacterFrame
 check(near(saved.x,600/1920) and near(saved.y,800/1080), 'saved position contains normalized screen coordinates')
 check(not CharacterFrame.userPlaced and CharacterFrame.dontSave, 'addon owns persistence without polluting native layout cache')
-CharacterFrame:Hide(); CharacterFrame:Show()
+HideUIPanel(CharacterFrame); drain(); ShowUIPanel(CharacterFrame)
 check(near(CharacterFrame.left,600) and near(CharacterFrame.top,800), 'position restored on reopen')
+check(character.detached and CharacterFrame.strata=='HIGH', 'custom window floats in common window layer')
 CharacterFrame:ClearAllPoints(); CharacterFrame:SetPoint('CENTER',UIParent,'CENTER',0,0)
 check(CharacterFrame.points[1][1]=='TOPLEFT' and near(CharacterFrame.left,600), 'native reposition cannot snap saved window back')
 character.handle.scripts.OnClick(character.handle,'RightButton')
 check(menu.label=='Reset to default' and menu.enabled and menu.owner==character.handle, 'right-click title opens reset dropdown')
 menu.callback()
-check(ForeverQoLDB.windowPositions.CharacterFrame==nil and CharacterFrame.points[1][4]==21, 'reset clears saved position and restores native default')
-check(CharacterFrame.attrs['UIPanelLayout-area']==nil, 'reset preserves overlapping capability')
+check(ForeverQoLDB.windowPositions.CharacterFrame==nil and slots.left==CharacterFrame, 'reset clears saved position and re-enters native layout')
+check(CharacterFrame.attrs['UIPanelLayout-area']=='left' and CharacterFrame.strata=='MEDIUM', 'reset restores native area and drawing layer')
+check(not character.escapeAdded, 'reset removes addon-only Escape registration')
 character.handle.scripts.OnDragStart(); CharacterFrame.left,CharacterFrame.top=500,800; character.handle.scripts.OnDragStop()
 CharacterFrame.scale=0.5
 W.Apply(character)
@@ -174,6 +227,7 @@ slots.left=alreadyOpen; alreadyOpen.shown=true
 W.Attach(alreadyOpen,true)
 local alreadyOpenRecord=W.records.AlreadyOpenPanel
 check(not alreadyOpenRecord.detached and alreadyOpen.shown, 'already-managed live panel is not hidden or removed from secure slots mid-interaction')
+ForeverQoLDB.windowPositions.AlreadyOpenPanel={x=.2,y=.8}
 alreadyOpen:Hide(); slots.left=nil; drain()
 check(alreadyOpenRecord.detached and alreadyOpen.attrs['UIPanelLayout-area']==nil, 'already-managed panel detaches safely after its native hide completes')
 local specialCount=#UISpecialFrames
@@ -214,6 +268,82 @@ local count=#timers
 W.QueueScan(); W.QueueScan(); W.QueueScan()
 check(#timers==count+1, 'load bursts coalesce generic discovery into one scan')
 drain()
+-- Reset must delegate current mode, free-space decisions and panel eviction to
+-- Blizzard; a hardcoded coordinate or old area cannot reproduce this behaviour.
+local function closeWindows()
+    for _,record in pairs(W.records) do if record.frame.shown then HideUIPanel(record.frame) end end
+    drain()
+end
+closeWindows()
+PlayerSpellsFrame=frame('PlayerSpellsFrame',UIParent,577,500)
+UIPanelWindows.PlayerSpellsFrame={area='centerOrLeft'}
+SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
+SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',-405)
+W.Scan()
+local spells=W.records.PlayerSpellsFrame
+ShowUIPanel(PlayerSpellsFrame)
+W.Start(spells); PlayerSpellsFrame.left,PlayerSpellsFrame.top=450,850; W.Stop(spells)
+HideUIPanel(PlayerSpellsFrame); drain(); ShowUIPanel(PlayerSpellsFrame)
+SetUIPanelAttribute(PlayerSpellsFrame,'area','centerOrLeft')
+SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',0)
+PlayerSpellsFrame:SetWidth(1154)
+check(spells.nativeArea=='centerOrLeft' and PlayerSpellsFrame.attrs['UIPanelLayout-area']==nil, 'expanded custom spellbook remembers new native area while remaining floating')
+combat=true
+SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
+combat=false
+eventHandler(nil,'PLAYER_REGEN_ENABLED')
+check(spells.nativeArea=='left' and PlayerSpellsFrame.attrs['UIPanelLayout-area']==nil, 'combat-deferred area change returns to floating mode after combat')
+SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
+SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',-405)
+PlayerSpellsFrame:SetWidth(577)
+W.Reset(spells)
+check(PlayerSpellsFrame.attrs['UIPanelLayout-area']=='left' and slots.left==PlayerSpellsFrame
+    and PlayerSpellsFrame.points[1][1]=='TOPLEFT', 'minimized spellbook reset uses live left area rather than centering from registry')
+check(PlayerSpellsFrame.attrs['UIPanelLayout-centerXOffset']==-405, 'reset preserves current minimize offset')
+HideUIPanel(PlayerSpellsFrame)
+SetUIPanelAttribute(PlayerSpellsFrame,'area','centerOrLeft')
+SetUIPanelAttribute(PlayerSpellsFrame,'centerXOffset',0)
+PlayerSpellsFrame:SetWidth(1154)
+ShowUIPanel(PlayerSpellsFrame)
+check(slots.center==PlayerSpellsFrame and PlayerSpellsFrame.points[1][1]=='TOP', 'expanded default spellbook follows native center-or-left placement')
+HideUIPanel(PlayerSpellsFrame)
+SetUIPanelAttribute(PlayerSpellsFrame,'area','left')
+PlayerSpellsFrame:SetWidth(577)
+ShowUIPanel(PlayerSpellsFrame)
+W.Start(spells); PlayerSpellsFrame.left,PlayerSpellsFrame.top=450,850; W.Stop(spells)
+HideUIPanel(PlayerSpellsFrame); drain()
+ShowUIPanel(MerchantFrame); ShowUIPanel(PlayerSpellsFrame)
+W.Reset(spells)
+check(MerchantFrame.shown and slots.center==PlayerSpellsFrame, 'reset uses available native panel space alongside another default window')
+W.Start(spells); W.Stop(spells)
+HideUIPanel(PlayerSpellsFrame); drain(); ShowUIPanel(PlayerSpellsFrame)
+UIParent.width=700
+W.Reset(spells)
+check(not MerchantFrame.shown and slots.left==PlayerSpellsFrame, 'reset lets native panel manager evict windows when there is not enough space')
+UIParent.width=1920
+closeWindows()
+WorldMapFrame=frame('WorldMapFrame',UIParent,700,500)
+WorldMapFrame.strata='HIGH'
+UIPanelWindows.WorldMapFrame={area='left'}
+W.Scan()
+local map=W.records.WorldMapFrame
+ShowUIPanel(CharacterFrame)
+W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
+HideUIPanel(CharacterFrame); drain(); ShowUIPanel(CharacterFrame)
+ForeverQoLDB.windowPositions.WorldMapFrame={x=.2,y=.8}
+W.Apply(map); ShowUIPanel(WorldMapFrame)
+check(WorldMapFrame.order>CharacterFrame.order and WorldMapFrame.shown and CharacterFrame.shown, 'opening custom map raises it above overlapping custom character sheet')
+HideUIPanel(CharacterFrame); ShowUIPanel(CharacterFrame)
+check(CharacterFrame.order>WorldMapFrame.order and CharacterFrame.strata==WorldMapFrame.strata
+    and near(CharacterFrame.left,420), 'C-M-C-C sequence reopens character sheet above map at same saved position')
+HideUIPanel(WorldMapFrame); ShowUIPanel(WorldMapFrame)
+check(WorldMapFrame.order>CharacterFrame.order, 'latest reopened custom window comes to front in either order')
+ShowUIPanel(BankFrame)
+W.Apply(bank)
+W.Reset(bank)
+check(not BankFrame.shown and ForeverQoLDB.windowPositions.BankFrame==nil, 'reset closes detached NPC window without resurrecting ended interaction')
+ShowUIPanel(BankFrame)
+check(slots.left==BankFrame and BankFrame.attrs['UIPanelLayout-area']=='left', 'next NPC interaction uses native default panel management')
 W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
 local persisted=ForeverQoLDB.windowPositions.CharacterFrame
 -- Simulate fresh UI objects and module state using the existing saved variables.
