@@ -25,6 +25,16 @@ The addon bundles 3,616 item associations covering 3,534 quest records from the 
 
 Completed uses can be recognized immediately after installation. Quest removal is recorded only from events observed while this addon is running, and saved separately for each character; absence from the quest log alone is not evidence. The tooltip describes known quest relevance, not a guarantee that an item has no other purpose. The addon never sells or deletes these items.
 
+## Movable windows
+
+Left-drag a window's title to move it. Positions are shared across characters and saved across closing, `/reload`, logout and game restarts. Right-click the title and choose **Reset to default** to clear that window's saved position. The reset keeps floating/overlap behaviour enabled. Clicking or dragging a title brings that window forward.
+
+Supported Blizzard panels float independently instead of being pushed aside or closed by the automatic left/center/right panel layout. Coverage includes character, spells, quests, bank, merchant, mail, trade, auction, professions, social, collections and other loaded panels, plus individual/combined bags. Additional named top-level windows with standard title fields are discovered as UI addons load. The title handles have no artwork and leave close/maximize buttons and window contents available.
+
+Saved coordinates account for window scale and screen dimensions and are clamped back onto the screen after resolution changes. Maximize/restore and combat restrictions remain owned by the game: restore a maximized window before moving it, and move/reset windows outside combat. A panel already managed by Blizzard when first discovered is detached after its native close, so its current interaction is not interrupted; reopen it for independent overlap. NPC/server interactions can still close their own windows. Fullscreen scenes, action bars, unit frames, tooltips, forbidden frames and unnamed widgets are not treated as movable windows.
+
+The implementation is independent, using [BlizzMove](https://github.com/Kiatra/BlizzMove) as behaviour inspiration and the Forever client's panel-manager APIs for floating panels.
+
 ## Development
 
 - `./tools/test.ps1` runs Lua regression tests, syntax checks, and TOC validation. Supply `-LuaPath` or `FOREVERQOL_LUA` if Lua is not on PATH. Locally the sibling QuestsStarts Lua runtime is also recognized.
@@ -42,6 +52,8 @@ Forever exposes `C_Bank.AutoDepositItemsIntoBank(bankType)` and `C_Bank.DoesBank
 Offline tests cover filtering, deposit/withdraw routing, bag coverage, account-bank restrictions, cancellation, stale slots, failed moves, counts, and native widget/menu construction. In-game appearance, server permissions for timer-driven transfers, partial-stack behavior, account-bank restrictions and taint/combat interactions require live verification. Check both bank types, full inventory/bank, bank closure mid-transfer, reload persistence and `/fql` before the first release.
 
 Quest-item tests cover generated-data integrity, completion and abandonment reasons, shared/future/repeatable uses, native active-use safeguards, missing data, recycled slots, tooltip output, character separation and event races. Live verification remains necessary for marker positioning, tooltip integration, turn-in/abandon/reaccept refreshes and client quest-history behavior.
+
+Movable-window tests cover normal left dragging, persistent positions on fresh UI objects, title reset menus, overlapping managed panels, original defaults, scale/resolution changes, clamping, invalid saved data, late window discovery, bag layout, Escape registration and combat-deferred operations. Live testing remains necessary for each client's protected-panel behaviour, unusual custom title bars, NPC interactions and windows controlled by other movers.
 
 ## Performance checks
 

@@ -7,7 +7,7 @@ end
 SLASH_FOREVERQOL1 = "/fql"
 SLASH_FOREVERQOL2 = "/foreverqol"
 SlashCmdList.FOREVERQOL = function()
-    F.Print(F.version .. " — bank transfers and quest-item markers enabled. Hover marked bag items for the reason.")
+    F.Print(F.version .. " — bank transfers, quest-item markers and movable windows enabled. Drag a window title; right-click it to reset.")
 end
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
@@ -22,6 +22,7 @@ events:SetScript("OnEvent", function(_, event, name)
         if name == addonName then
             F.InitializeDB()
             F.QuestItems.Initialize()
+            F.Windows.Initialize()
         end
         F.AttachBankControls()
     elseif event == "BANKFRAME_CLOSED" or event == "PLAYER_REGEN_DISABLED" then

@@ -9,4 +9,5 @@ Filters.lua
 Bank.lua
 QuestItemData.lua
 QuestItems.lua
+Windows.lua
 Core.lua
