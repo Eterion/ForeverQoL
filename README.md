@@ -53,7 +53,7 @@ Offline tests cover filtering, deposit/withdraw routing, bag coverage, account-b
 
 Quest-item tests cover generated-data integrity, completion and abandonment reasons, shared/future/repeatable uses, native active-use safeguards, missing data, recycled slots, tooltip output, character separation and event races. Live verification remains necessary for marker positioning, tooltip integration, turn-in/abandon/reaccept refreshes and client quest-history behavior.
 
-Movable-window tests cover normal left dragging, persistent positions on fresh UI objects, title reset menus, compact/expanded spellbook metadata, native panel placement and eviction after reset, reopening order across frame strata, overlapping managed panels, original defaults, scale/resolution changes, clamping, invalid saved data, late window discovery, bag layout, Escape registration and combat-deferred operations. Live testing remains necessary for each client's protected-panel behaviour, unusual custom title bars, NPC interactions and windows controlled by other movers.
+Movable-window tests cover normal left dragging, persistent positions on fresh UI objects, title reset menus, compact/expanded spellbook metadata, native panel placement and eviction after reset, reopening order across frame strata, professions progress-bar layering, overlapping managed panels, original defaults, scale/resolution changes, clamping, invalid saved data, late window discovery, bag layout, Escape registration and combat-deferred operations. Live testing remains necessary for each client's protected-panel behaviour, unusual custom title bars, NPC interactions and windows controlled by other movers.
 
 ## Performance checks
 

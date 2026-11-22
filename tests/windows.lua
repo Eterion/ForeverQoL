@@ -344,6 +344,60 @@ W.Reset(bank)
 check(not BankFrame.shown and ForeverQoLDB.windowPositions.BankFrame==nil, 'reset closes detached NPC window without resurrecting ended interaction')
 ShowUIPanel(BankFrame)
 check(slots.left==BankFrame and BankFrame.attrs['UIPanelLayout-area']=='left', 'next NPC interaction uses native default panel management')
+closeWindows()
+-- Match Forever's book: page level 100, cards on the page's strata, and
+-- explicitly HIGH rank bars with low levels. Raise does not move those bars.
+ProfessionsFrame=frame('ProfessionsFrame',UIParent)
+UIPanelWindows.ProfessionsFrame={area='left'}
+local page=frame(nil,ProfessionsFrame); page.level=100
+local content=frame(nil,page); content.level=101
+ProfessionsFrame.BookPage=page; page.ProfessionsContentFrame=content
+local crafting=frame(nil,ProfessionsFrame); crafting.level=100; ProfessionsFrame.CraftingPage=crafting
+crafting.RankBar=frame(nil,crafting); crafting.RankBar.strata='HIGH'; crafting.RankBar.level=1
+local cards={}
+for _,key in ipairs({'PrimaryProfession1','PrimaryProfession2','SecondaryProfession1','SecondaryProfession2','SecondaryProfession3'}) do
+    local card=frame(nil,content); card.level=102; content[key]=card
+    local bar=frame(nil,card); bar.strata='HIGH'; bar.level=1; card.StatusBar=bar
+    bar.Rank=frame(nil,bar); bar.Rank.strata='HIGH'; bar.Rank.level=5
+    bar.ExpansionDropdownButton=frame(nil,bar); bar.ExpansionDropdownButton.strata='HIGH'; bar.ExpansionDropdownButton.level=2
+    cards[#cards+1]=card
+end
+local nativeRaise=ProfessionsFrame.Raise
+function ProfessionsFrame:Raise()
+    nativeRaise(self)
+    self.level=self.level+100; page.level=page.level+100; content.level=content.level+100; crafting.level=crafting.level+100
+    for _,card in ipairs(cards) do card.level=card.level+100 end
+end
+W.Scan(); local professions=W.records.ProfessionsFrame
+ShowUIPanel(ProfessionsFrame)
+check(cards[1].StatusBar.level==1 and professions.professionLayers==nil, 'unmoved professions preserves native bar layers')
+W.Start(professions); W.Stop(professions)
+for _,card in ipairs(cards) do
+    check(card.StatusBar.level>card.level and card.StatusBar.Rank.level>card.StatusBar.level
+        and card.StatusBar.ExpansionDropdownButton.level>card.StatusBar.level, 'primary and secondary progress bars, rank text and dropdown remain above raised profession cards')
+end
+check(crafting.RankBar.level>crafting.level, 'crafting page rank bar remains above its raised page')
+HideUIPanel(ProfessionsFrame); drain(); ShowUIPanel(ProfessionsFrame)
+check(cards[1].StatusBar.level==cards[1].level+1, 'reopening raises professions without hiding its explicit HIGH bars')
+professions.handle.scripts.OnMouseDown()
+check(cards[1].StatusBar.level==cards[1].level+1, 'clicking title preserves progress bar visibility after another raise')
+local savedProfessionPosition=ForeverQoLDB.windowPositions.ProfessionsFrame
+ShowUIPanel(WorldMapFrame)
+W.Front(map); W.Front(professions)
+check(ProfessionsFrame.order>WorldMapFrame.order and ForeverQoLDB.windowPositions.ProfessionsFrame==savedProfessionPosition,
+    'professions still comes forward over map without changing saved position')
+W.Reset(professions)
+check(professions.professionLayers==nil and ProfessionsFrame.strata=='MEDIUM'
+    and cards[1].StatusBar.level-cards[1].level==-101
+    and cards[1].StatusBar.Rank.level-cards[1].StatusBar.level==4,
+    'reset restores original relative profession bar and rank layers')
+check(crafting.RankBar.level-crafting.level==-99, 'reset restores original crafting rank bar layer')
+ProfessionsBookFrame=frame('ProfessionsBookFrame',UIParent)
+ProfessionsBookFrame.ProfessionsContentFrame=content
+W.Scan()
+local standaloneBook=W.records.ProfessionsBookFrame
+W.Start(standaloneBook); W.Stop(standaloneBook)
+check(cards[1].StatusBar.level>cards[1].level, 'standalone profession book also keeps bars above cards')
 W.Start(character); CharacterFrame.left,CharacterFrame.top=420,750; W.Stop(character)
 local persisted=ForeverQoLDB.windowPositions.CharacterFrame
 -- Simulate fresh UI objects and module state using the existing saved variables.

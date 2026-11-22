@@ -12,7 +12,7 @@ local names = {
     'CharacterFrame', 'PlayerSpellsFrame', 'SpellBookFrame', 'WorldMapFrame',
     'QuestLogFrame', 'QuestFrame', 'GossipFrame', 'MerchantFrame', 'BankFrame',
     'MailFrame', 'OpenMailFrame', 'TradeFrame', 'AuctionHouseFrame', 'AuctionFrame',
-    'ClassTrainerFrame', 'TrainerFrame', 'TradeSkillFrame', 'CraftFrame', 'ProfessionsFrame',
+    'ClassTrainerFrame', 'TrainerFrame', 'TradeSkillFrame', 'CraftFrame', 'ProfessionsFrame', 'ProfessionsBookFrame',
     'ProfessionsCustomerOrdersFrame', 'FriendsFrame', 'SocialUIFrame', 'GuildFrame',
     'CommunitiesFrame', 'InspectFrame', 'DressUpFrame', 'CollectionsJournal', 'EncounterJournal',
     'AchievementFrame', 'ItemTextFrame', 'ItemSocketingFrame', 'ItemUpgradeFrame',
@@ -83,6 +83,52 @@ local function Default(record)
     frame:SetUserPlaced(false)
 end
 
+local professionCards = {'PrimaryProfession1', 'PrimaryProfession2',
+    'SecondaryProfession1', 'SecondaryProfession2', 'SecondaryProfession3'}
+
+local function ProfessionLayers(record, mode)
+    if mode == 'restore' then
+        for _, layer in ipairs(record.professionLayers or {}) do
+            layer.frame:SetFrameLevel(math.max(0, layer.frame:GetParent():GetFrameLevel() + layer.offset))
+        end
+        record.professionLayers = nil
+        return
+    end
+    if record.name ~= 'ProfessionsFrame' and record.name ~= 'ProfessionsBookFrame' then return end
+    local frame = record.frame
+    local content = frame.ProfessionsContentFrame or (frame.BookPage and frame.BookPage.ProfessionsContentFrame)
+    record.professionLayers = record.professionLayers or {}
+    local function AboveParent(widget)
+        if not widget or not Allowed(widget) then return end
+        local parent = widget:GetParent()
+        local found
+        for _, layer in ipairs(record.professionLayers) do if layer.frame == widget then found = true; break end end
+        if not found then
+            record.professionLayers[#record.professionLayers + 1] = {
+                frame = widget, offset = widget:GetFrameLevel() - parent:GetFrameLevel(),
+            }
+        end
+        -- Forever's book bars use an explicit HIGH strata with low frame
+        -- levels. Raising the whole window into HIGH otherwise hides them
+        -- beneath the book cards (whose page starts at frame level 100).
+        if mode ~= 'capture' and widget:GetFrameLevel() <= parent:GetFrameLevel() then
+            widget:SetFrameLevel(parent:GetFrameLevel() + 1)
+        end
+    end
+    local function Bar(bar)
+        if bar then
+            AboveParent(bar)
+            AboveParent(bar.Rank)
+            AboveParent(bar.ExpansionDropdownButton)
+        end
+    end
+    for _, key in ipairs(professionCards) do
+        local card = content and content[key]
+        Bar(card and card.StatusBar)
+    end
+    Bar(frame.CraftingPage and frame.CraftingPage.RankBar)
+end
+
 local function RestoreNative(record)
     if record.detached then
         record.frame:SetAttributeNoHandler('UIPanelLayout-area', record.nativeArea or record.panel.area)
@@ -95,14 +141,17 @@ local function RestoreNative(record)
         record.escapeAdded = nil
     end
     record.frame:SetFrameStrata(record.nativeStrata)
+    ProfessionLayers(record, 'restore')
 end
 
 function W.Front(record)
     if not positions[record.name] or not Allowed(record.frame) or not record.frame:IsShown() then return end
     -- Raise alone cannot cross strata (the map and character sheet differ).
     -- Keep custom windows together, then let the engine raise the whole family.
+    ProfessionLayers(record, 'capture')
     record.frame:SetFrameStrata('HIGH')
     record.frame:Raise()
+    ProfessionLayers(record)
 end
 
 function W.Apply(record)
@@ -150,8 +199,10 @@ function W.Start(record)
     if activeDrag then W.Stop(activeDrag) end
     local frame = record.frame
     record.moving, activeDrag = true, record
+    ProfessionLayers(record, 'capture')
     frame:SetFrameStrata('HIGH')
     frame:Raise()
+    ProfessionLayers(record)
     frame:StartMoving()
 end
 
@@ -227,7 +278,9 @@ function W.Attach(frame, explicit)
     handle:RegisterForClicks('RightButtonUp')
     handle:SetScript('OnDragStart', function() W.Start(record) end)
     handle:SetScript('OnDragStop', function() W.Stop(record) end)
-    handle:SetScript('OnMouseDown', function() if Allowed(frame) then frame:Raise() end end)
+    handle:SetScript('OnMouseDown', function()
+        if Allowed(frame) then frame:Raise(); if positions[name] then ProfessionLayers(record) end end
+    end)
     handle:SetScript('OnClick', function(self, button) if button == 'RightButton' then Menu(record, self) end end)
     frame:HookScript('OnShow', function()
         if not Allowed(frame) then return end
