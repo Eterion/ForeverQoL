@@ -36,6 +36,7 @@ The mover uses an explicit list of ordinary Blizzard windows and bags. It does n
 Native OnShow/OnHide scripts, panel attributes, Escape registrations and child drawing layers are left intact. See the [window safety audit](docs/window-layer-audit.md). [BlizzMove](https://github.com/Kiatra/BlizzMove) remains behavior inspiration; the implementation is independent.
 
 After updating from a build that produced blocked interface actions, use `/reload` before testing again. `/fql errors` reports the count and last protected function attributed to ForeverQoL since that reload. This diagnostic does not change the UI or try to bypass blocked actions. If the action bars disappear again, report that output and the action that preceded it.
+
 ## Development
 
 - `./tools/test.ps1` runs Lua regression tests, syntax checks, and TOC validation. Supply `-LuaPath` or `FOREVERQOL_LUA` if Lua is not on PATH. Locally the sibling QuestsStarts Lua runtime is also recognized.
